@@ -25,3 +25,8 @@ dist-ssr
 
 # local secrets
 .env
+
+# demo film: captured footage and renders (see demo/README.md)
+demo/assets
+demo/preview
+demo/*.mp4

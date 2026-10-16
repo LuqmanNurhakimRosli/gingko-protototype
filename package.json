@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "demo:capture": "node demo/capture.mjs",
+    "demo:render": "node demo/render.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
@@ -29,6 +31,7 @@
     "@vitejs/plugin-react": "^6.0.4",
     "oxlint": "^1.75.0",
     "pbf": "5.1.2",
+    "playwright": "1.56.1",
     "typescript": "~6.0.2",
     "vite": "^8.2.0",
     "vitest": "^5.0.5"

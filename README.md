@@ -9,7 +9,8 @@ open terrain, river, land-cover, water-history and census data — with its sour
 > The copilot explains computed numbers; it never produces one.
 
 **Every workflow as Input → Process → Output (incl. AI and AI efficiency):** [`docs/WORKFLOW_BLUEPRINT.md`](docs/WORKFLOW_BLUEPRINT.md) ·
-**Architecture, where AI is used, and API setup:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+**Architecture, where AI is used, and API setup:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) ·
+**2-minute demo film (silent, captioned):** [`docs/demo/ginkgo-demo.mp4`](docs/demo/ginkgo-demo.mp4), made with [`demo/`](demo/README.md).
 
 ## What you can do
 

@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ginkgo demo film</title>
+<style>
+  /* Ginkgo demo film — every frame is a pure function of time t (seconds):
+     window.renderAt(t) poses the scene, demo/render.mjs screenshots it. */
+  :root {
+    --green: #08A045; --green-d: #067A35; --green-l: #E8F6ED; --mint: #C8E8CF;
+    --ink: #111418; --muted: #5F6368; --line: #E3E6E4;
+    --high: #DC2626; --mod: #EDA100; --low: #2A78D6; --water: #9DCBF3; --blue: #1A73E8;
+    --dark: #052219; --dark2: #0A3A2A;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #000; }
+  body { font-family: Inter, system-ui, sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
+  #stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #F5F7F6; }
+  .scene { position: absolute; inset: 0; opacity: 0; will-change: opacity; }
+  .light { background: radial-gradient(1200px 700px at 70% 10%, #FFFFFF 0%, #F3F6F4 60%, #EDF2EF 100%); }
+  .light::before { content: ''; position: absolute; inset: 0;
+    background-image: linear-gradient(rgba(8,160,69,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(8,160,69,.05) 1px, transparent 1px);
+    background-size: 48px 48px; }
+  .dark { background: radial-gradient(1400px 900px at 50% 40%, var(--dark2) 0%, var(--dark) 70%); color: #fff; }
+  .abs { position: absolute; }
+  .eyebrow { font-size: 22px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: var(--green); }
+  .h1 { font-size: 86px; font-weight: 800; letter-spacing: -.03em; line-height: 1.02; }
+  .h2 { font-size: 58px; font-weight: 800; letter-spacing: -.025em; line-height: 1.08; }
+  .sub { font-size: 28px; color: var(--muted); line-height: 1.4; }
+  .mono { font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; }
+
+  /* logo */
+  .logo { display: flex; align-items: center; gap: 26px; }
+  .logo .mark { width: 120px; height: 120px; border-radius: 30px; background: linear-gradient(135deg, #12C25A, var(--green) 55%, var(--green-d));
+    display: grid; place-items: center; font-size: 74px; font-weight: 900; color: #fff; box-shadow: 0 20px 60px rgba(8,160,69,.45); }
+  .logo .word { font-size: 104px; font-weight: 900; letter-spacing: .04em; display: flex; }
+  .logo .word span { display: inline-block; }
+
+  /* rain */
+  .drop { position: absolute; width: 2px; border-radius: 2px; background: linear-gradient(180deg, rgba(157,203,243,0), rgba(157,203,243,.75)); transform: rotate(12deg); }
+  .ripple { position: absolute; border: 2px solid rgba(157,203,243,.5); border-radius: 50%; transform: translate(-50%, -50%) scaleY(.32); }
+
+  /* stat cards */
+  .stat { width: 500px; padding: 34px 36px; border-radius: 26px; background: #fff; border: 1px solid var(--line);
+    box-shadow: 0 18px 50px rgba(17,20,24,.08); }
+  .stat .num { font-size: 92px; font-weight: 800; letter-spacing: -.04em; line-height: 1; }
+  .stat .lbl { font-size: 26px; font-weight: 600; margin-top: 14px; }
+  .stat .src { font-size: 19px; color: var(--muted); margin-top: 8px; }
+  .stat .bar { height: 8px; border-radius: 4px; margin-bottom: 26px; width: 84px; }
+
+  /* workflow */
+  .col-title { font-size: 26px; font-weight: 800; letter-spacing: .16em; color: var(--green); text-transform: uppercase; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 10px 30px rgba(17,20,24,.07); }
+  .in-card { width: 470px; height: 104px; display: flex; align-items: center; gap: 20px; padding: 0 24px; }
+  .in-card .ico { width: 58px; height: 58px; border-radius: 16px; display: grid; place-items: center; flex-shrink: 0; }
+  .in-card b { display: block; font-size: 23px; font-weight: 700; }
+  .in-card span { font-size: 18px; color: var(--muted); }
+  .proc { width: 560px; padding: 30px 32px; }
+  .step { display: flex; align-items: center; gap: 18px; height: 78px; font-size: 24px; font-weight: 600; }
+  .step .n { width: 46px; height: 46px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center;
+    font-size: 20px; font-weight: 800; color: var(--muted); flex-shrink: 0; }
+  .step.on .n { background: var(--green); border-color: var(--green); color: #fff; }
+  .step small { display: block; font-size: 17px; font-weight: 500; color: var(--muted); }
+  .out-card { width: 400px; height: 132px; display: flex; align-items: center; gap: 20px; padding: 0 26px; }
+  .out-card .ico { width: 70px; height: 70px; border-radius: 18px; background: var(--green-l); display: grid; place-items: center; flex-shrink: 0; }
+  .out-card b { font-size: 25px; font-weight: 800; display: block; }
+  .out-card span { font-size: 18px; color: var(--muted); }
+  svg.ic { width: 34px; height: 34px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* formula */
+  .wbar { display: flex; height: 120px; width: 1500px; border-radius: 22px; overflow: hidden; background: #E8ECEA; }
+  .wseg { height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 0 22px; color: #fff; overflow: hidden; white-space: nowrap; }
+  .wseg b { font-size: 40px; font-weight: 800; }
+  .wseg span { font-size: 19px; font-weight: 600; opacity: .9; }
+  .gauge { width: 1500px; height: 30px; border-radius: 15px; position: relative;
+    background: linear-gradient(90deg, #BFD6F4 0%, #BFD6F4 40%, #F9D98A 40%, #F9D98A 60%, #F5A3A3 60%, #F5A3A3 100%); }
+  .gauge .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 15px; background: linear-gradient(90deg, var(--low), var(--mod) 60%, var(--high)); }
+  .gauge .tick { position: absolute; top: -12px; bottom: -12px; width: 3px; background: var(--ink); opacity: .55; }
+  .gauge .tl { position: absolute; top: 42px; transform: translateX(-50%); font-size: 19px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+
+  /* browser frame for app footage */
+  .frame { position: absolute; left: 192px; top: 46px; width: 1536px; height: 900px; border-radius: 18px; overflow: hidden; background: #fff;
+    box-shadow: 0 40px 120px rgba(5,34,25,.28), 0 0 0 1px rgba(0,0,0,.06); }
+  .frame .bar { height: 36px; background: #F1F3F4; display: flex; align-items: center; gap: 9px; padding: 0 16px; border-bottom: 1px solid #E3E6E4; }
+  .frame .bar i { width: 12px; height: 12px; border-radius: 50%; background: #D4D7DA; }
+  .frame .bar i:nth-child(1) { background: #FF5F57; } .frame .bar i:nth-child(2) { background: #FEBC2E; } .frame .bar i:nth-child(3) { background: #28C840; }
+  .frame .url { margin-left: 18px; height: 24px; width: 520px; border-radius: 12px; background: #fff; font-size: 14px; color: var(--muted); display: flex; align-items: center; padding: 0 14px; }
+  .frame .vp { position: absolute; left: 0; top: 36px; width: 1536px; height: 864px; overflow: hidden; }
+  .shot { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+  .shot img { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+
+  /* overlays inside footage (screenshot pixel coordinates) */
+  .ring { position: absolute; border-radius: 50%; border: 4px solid var(--green); transform: translate(-50%, -50%); box-shadow: 0 0 0 6px rgba(8,160,69,.18); }
+  .hl { position: absolute; border-radius: 14px; border: 4px solid var(--green); box-shadow: 0 0 0 9999px rgba(5,34,25,.0); }
+  .cursor { position: absolute; width: 34px; height: 34px; transform-origin: 0 0; filter: drop-shadow(0 3px 4px rgba(0,0,0,.35)); }
+  .press { position: absolute; width: 44px; height: 44px; border-radius: 50%; background: rgba(26,115,232,.25); border: 2px solid var(--blue); transform: translate(-50%,-50%); }
+  .drawrect { position: absolute; border: 2.5px solid var(--blue); box-shadow: 0 0 0 2.5px rgba(255,255,255,.85); background: rgba(26,115,232,.07); }
+
+  /* captions + chapter bar */
+  .caption { position: absolute; left: 50%; bottom: 66px; transform: translateX(-50%); display: flex; align-items: center; gap: 16px;
+    padding: 16px 30px 16px 18px; border-radius: 40px; background: rgba(17,20,24,.88); color: #fff; font-size: 27px; font-weight: 600;
+    white-space: nowrap; box-shadow: 0 16px 40px rgba(0,0,0,.25); }
+  .caption .tag { font-size: 17px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; background: var(--green); padding: 7px 14px; border-radius: 22px; }
+  .caption .hi { color: #7EE2A6; }
+  #chapters { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); display: flex; gap: 10px; z-index: 50; opacity: 0; }
+  #chapters .ch { width: 168px; }
+  #chapters .ch .t { font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: rgba(17,20,24,.45); margin-bottom: 6px; text-align: center; }
+  #chapters .ch.on .t { color: var(--green-d); }
+  #chapters .ch .b { height: 5px; border-radius: 3px; background: rgba(17,20,24,.12); overflow: hidden; }
+  #chapters .ch .b i { display: block; height: 100%; width: 0; background: var(--green); }
+  #chapters.ondark .ch .t { color: rgba(255,255,255,.55); }
+  #chapters.ondark .ch.on .t { color: #7EE2A6; }
+  #chapters.ondark .ch .b { background: rgba(255,255,255,.2); }
+
+  /* side panels on footage scenes */
+  .float { position: absolute; background: #fff; border-radius: 24px; box-shadow: 0 30px 80px rgba(5,34,25,.25); border: 1px solid var(--line); }
+  .bignum { font-size: 104px; font-weight: 800; letter-spacing: -.045em; line-height: 1; }
+  .pill-row { display: flex; gap: 8px; }
+  .pill { padding: 10px 18px; border-radius: 22px; font-size: 20px; font-weight: 700; background: #F1F3F4; color: var(--muted); }
+  .pill.on { background: var(--ink); color: #fff; }
+
+  /* agent loop */
+  .node { position: absolute; width: 330px; padding: 22px 24px; border-radius: 22px; background: #fff; border: 2px solid var(--line);
+    box-shadow: 0 14px 36px rgba(17,20,24,.08); transform: translate(-50%, -50%); text-align: center; }
+  .node b { display: block; font-size: 24px; font-weight: 800; }
+  .node span { font-size: 18px; color: var(--muted); }
+  .node.on { border-color: var(--green); box-shadow: 0 0 0 8px rgba(8,160,69,.12), 0 14px 36px rgba(17,20,24,.08); }
+  .node .nn { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); width: 36px; height: 36px; border-radius: 50%; background: var(--green); color: #fff; font-weight: 800; font-size: 18px; display: grid; place-items: center; }
+  .pkt { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 6px rgba(8,160,69,.2); transform: translate(-50%, -50%); }
+  .code { position: absolute; font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 22px; background: var(--dark); color: #DDF5E6; border-radius: 16px; padding: 18px 24px; white-space: pre; box-shadow: 0 18px 40px rgba(5,34,25,.3); }
+  .code .k { color: #7EE2A6; } .code .s { color: #F9D98A; }
+  .node.box { width: 540px; }
+  .node .tools { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 16px; }
+  .tchip { padding: 6px 11px; border-radius: 10px; background: #F1F3F4; color: var(--muted); font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 15px; font-weight: 600; white-space: nowrap; display: inline-block; }
+  .tchip.used { background: var(--green); color: #fff; box-shadow: 0 6px 16px rgba(8,160,69,.35); }
+
+  /* trust grid */
+  .tile { position: absolute; width: 520px; height: 230px; padding: 30px 32px; border-radius: 26px; background: #fff; border: 1px solid var(--line); box-shadow: 0 16px 44px rgba(17,20,24,.07); }
+  .tile .ico { width: 62px; height: 62px; border-radius: 18px; background: var(--green-l); color: var(--green-d); display: grid; place-items: center; margin-bottom: 18px; }
+  .tile b { display: block; font-size: 30px; font-weight: 800; letter-spacing: -.01em; }
+  .tile span { display: block; font-size: 21px; color: var(--muted); margin-top: 8px; line-height: 1.35; }
+
+  .credits { font-size: 18px; color: rgba(255,255,255,.55); text-align: center; line-height: 1.6; }
+  .chip-d { padding: 12px 24px; border-radius: 30px; border: 1.5px solid rgba(126,226,166,.5); color: #CFF5DE; font-size: 24px; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- S1 intro -->
+  <section class="scene dark" id="s1">
+    <div id="rain" class="abs" style="inset:0"></div>
+    <div class="abs" style="left:0;right:0;top:330px;display:flex;flex-direction:column;align-items:center;gap:34px">
+      <div class="logo"><div class="mark" id="s1mark">G</div><div class="word" id="s1word"></div></div>
+      <div id="s1tag" style="font-size:40px;font-weight:600;color:#DDF5E6">Flood-aware planning for Selangor</div>
+      <div id="s1sub" style="font-size:24px;color:rgba(255,255,255,.6);letter-spacing:.04em">Riverine flood susceptibility &nbsp;·&nbsp; open data &nbsp;·&nbsp; AI you can check</div>
+    </div>
+  </section>
+
+  <!-- S2 question + stats -->
+  <section class="scene light" id="s2">
+    <div class="abs" style="left:160px;top:150px">
+      <div class="eyebrow" id="s2eye">The question</div>
+      <div class="h1" id="s2h" style="margin-top:20px">Where is flooding most likely —<br><span style="color:var(--green)">and who is exposed?</span></div>
+    </div>
+    <div class="abs" style="left:160px;top:560px;display:flex;gap:40px">
+      <div class="stat" id="st1"><div class="bar" style="background:var(--green)"></div><div class="num" id="n1">0</div><div class="lbl">people in Selangor's 9 daerah</div><div class="src">DOSM Census 2020</div></div>
+      <div class="stat" id="st2"><div class="bar" style="background:var(--high)"></div><div class="num" id="n2" style="color:var(--high)">0</div><div class="lbl">of the land is High susceptibility</div><div class="src">Normal rain · Ginkgo Stage 1</div></div>
+      <div class="stat" id="st3"><div class="bar" style="background:var(--mod)"></div><div class="num" id="n3">0</div><div class="lbl">people live in High cells</div><div class="src">estimate · Meta HRSL × Census</div></div>
+    </div>
+  </section>
+
+  <!-- S3 workflow -->
+  <section class="scene light" id="s3">
+    <div class="abs" style="left:0;right:0;top:56px;text-align:center">
+      <div class="eyebrow">How it works</div>
+      <div class="h2" style="margin-top:8px">Input <span style="color:var(--green)">→</span> Process <span style="color:var(--green)">→</span> Output</div>
+    </div>
+    <svg id="s3wires" class="abs" style="left:0;top:0" width="1920" height="1080"></svg>
+    <div class="col-title abs" id="s3t0" style="left:110px;top:236px">Input · open data</div>
+    <div id="s3in"></div>
+    <div class="col-title abs" id="s3t1" style="left:680px;top:236px">Process · once, offline</div>
+    <div class="card proc abs" id="s3proc" style="left:680px;top:286px"></div>
+    <div class="col-title abs" id="s3t2" style="left:1410px;top:236px">Output</div>
+    <div id="s3out"></div>
+  </section>
+
+  <!-- S4 formula -->
+  <section class="scene light" id="s4">
+    <div class="abs" style="left:210px;top:120px">
+      <div class="eyebrow">One transparent formula</div>
+      <div class="h2" style="margin-top:12px">Every ~92 m cell gets a flood score</div>
+    </div>
+    <div class="abs" style="left:210px;top:330px">
+      <div class="wbar" id="wbar"></div>
+    </div>
+    <div class="abs" style="left:210px;top:520px;font-size:26px;font-weight:700" id="s4ex">
+      Example cell: <span style="font-weight:500;color:var(--muted)">2 m above drainage · 300 m from a river · flat · 10 m above sea</span>
+    </div>
+    <div class="abs mono" style="left:210px;top:582px;font-size:28px;color:var(--ink)" id="s4sum"></div>
+    <div class="abs" id="s4g" style="left:210px;top:680px"><div class="gauge" id="gauge"><div class="fill" id="gfill"></div>
+      <div class="tick" style="left:40%"></div><div class="tl" style="left:40%">Moderate from 0.40</div>
+      <div class="tick" style="left:60%"></div><div class="tl" style="left:60%">High from 0.60</div></div></div>
+    <div class="abs" style="left:210px;top:800px;display:flex;align-items:center;gap:22px" id="s4res">
+      <div style="font-size:64px;font-weight:800;letter-spacing:-.03em" id="s4score">0.00</div>
+      <div style="padding:12px 24px;border-radius:30px;background:var(--high);color:#fff;font-size:30px;font-weight:800">High</div>
+      <div style="font-size:22px;color:var(--muted);max-width:760px;line-height:1.4">Heavy and Extreme rain lower the thresholds. Weights are illustrative, not calibrated — this is susceptibility, not a forecast.</div>
+    </div>
+  </section>
+
+  <!-- S5 map fly-in -->
+  <section class="scene" id="s5" style="background:#9DCBF3">
+    <img id="fly" class="abs" style="left:0;top:0;width:1920px;height:1080px" alt="">
+    <div class="abs" style="left:56px;top:48px;display:flex;align-items:center;gap:14px;padding:12px 20px 12px 12px;border-radius:40px;background:rgba(255,255,255,.95);box-shadow:0 10px 30px rgba(0,0,0,.15)" id="s5badge">
+      <div style="width:44px;height:44px;border-radius:12px;background:var(--green);color:#fff;display:grid;place-items:center;font-weight:900;font-size:24px">G</div>
+      <div style="font-size:22px;font-weight:800">Selangor <span style="font-weight:500;color:var(--muted)">· live map, Normal rain</span></div>
+    </div>
+    <div class="abs" style="right:56px;top:48px;padding:18px 22px;border-radius:18px;background:rgba(255,255,255,.95);box-shadow:0 10px 30px rgba(0,0,0,.15);font-size:19px;font-weight:600" id="s5leg">
+      <div style="display:flex;align-items:center;gap:10px"><i style="width:18px;height:18px;border-radius:4px;background:var(--high);opacity:.7"></i>High</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:8px"><i style="width:18px;height:18px;border-radius:4px;background:var(--mod);opacity:.7"></i>Moderate</div>
+    </div>
+    <div class="caption" id="s5cap"></div>
+  </section>
+
+  <!-- S6 scenarios -->
+  <section class="scene light" id="s6">
+    <div class="frame"><div class="bar"><i></i><i></i><i></i><div class="url">ginkgo · Selangor flood command center</div></div>
+      <div class="vp"><div class="shot" id="s6shot"><img id="s6a" src=""><img id="s6b" src=""><img id="s6c" src=""></div></div></div>
+    <div class="float" id="s6card" style="left:1250px;top:560px;width:560px;padding:30px 34px">
+      <div style="font-size:19px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)">Rain scenario</div>
+      <div class="pill-row" style="margin:16px 0 22px"><div class="pill" id="p1">Normal</div><div class="pill" id="p2">Heavy 50 mm/hr</div><div class="pill" id="p3">Extreme 120</div></div>
+      <div class="bignum" id="s6num" style="color:var(--high)">24.1%</div>
+      <div style="font-size:22px;font-weight:600;margin-top:10px">of Selangor's land is High</div>
+    </div>
+    <div class="caption" id="s6cap"><span class="tag">Scenarios</span>Heavier rain lowers the class thresholds — a stress test, not a hydraulic model</div>
+  </section>
+
+  <!-- S7 facilities -->
+  <section class="scene light" id="s7">
+    <div class="frame"><div class="bar"><i></i><i></i><i></i><div class="url">ginkgo · Klang · hospitals &amp; schools</div></div>
+      <div class="vp"><div class="shot" id="s7shot"><img id="s7a" src=""></div></div></div>
+    <div class="float" id="s7card" style="left:96px;top:600px;width:520px;padding:28px 32px">
+      <div style="font-size:19px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)">Selangor · Normal rain</div>
+      <div style="display:flex;align-items:baseline;gap:14px;margin-top:12px"><div class="bignum" style="font-size:88px;color:var(--high)" id="s7n">32</div><div style="font-size:26px;font-weight:700">of 116 hospitals</div></div>
+      <div style="font-size:22px;color:var(--muted);margin-top:6px">sit in High cells · 155 of 626 schools</div>
+    </div>
+    <div class="caption" id="s7cap"><span class="tag">Exposure</span>2,955 hospitals, clinics, schools, police, Bomba &amp; rail stations — each pin coloured by its flood class</div>
+  </section>
+
+  <!-- S8 draw + report -->
+  <section class="scene light" id="s8">
+    <div class="frame"><div class="bar"><i></i><i></i><i></i><div class="url">ginkgo · draw an area</div></div>
+      <div class="vp"><div class="shot" id="s8shot"><img id="s8a" src=""><img id="s8b" src="">
+        <div class="drawrect" id="s8rect"></div><div class="press" id="s8press"></div>
+        <div class="hl" id="s8hl" style="left:1505px;top:105px;width:405px;height:300px"></div>
+        <svg class="cursor" id="s8cur" viewBox="0 0 24 24"><path d="M4 2l15 11-6.5 1.2 3.7 7.3-2.7 1.4-3.7-7.4L4 20z" fill="#111" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>
+      </div></div></div>
+    <div class="float" id="s8card" style="left:96px;top:560px;width:470px;padding:28px 32px">
+      <div style="font-size:19px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)">Area 1 · Klang · Normal</div>
+      <div class="bignum" style="font-size:84px;color:var(--high);margin-top:10px">79.4%</div>
+      <div style="font-size:23px;font-weight:600;margin-top:6px">High land · ~213K people in High cells</div>
+      <div style="display:flex;gap:10px;margin-top:18px"><div class="pill" style="background:var(--green);color:#fff">⇩ PDF brief</div><div class="pill">⇩ GeoJSON</div></div>
+    </div>
+    <div class="caption" id="s8cap"><span class="tag">Analyse</span>Draw any area → an instant report for all three rain scenarios</div>
+  </section>
+
+  <!-- S9 ask (typing) -->
+  <section class="scene light" id="s9">
+    <div class="frame"><div class="bar"><i></i><i></i><i></i><div class="url">ginkgo · ask in plain language</div></div>
+      <div class="vp"><div class="shot" id="s9shot"><img id="s9t" src=""><img id="s9b" src=""></div></div></div>
+    <div class="caption" id="s9cap"><span class="tag">Ask Ginkgo</span>Type a question in the search box — in English or Bahasa Melayu</div>
+  </section>
+
+  <!-- S10 agent loop -->
+  <section class="scene light" id="s10">
+    <div class="abs" style="left:0;right:0;top:54px;text-align:center">
+      <div class="eyebrow">Behind the answer</div>
+      <div class="h2" style="margin-top:8px">The AI uses tools — it never invents a number</div>
+    </div>
+    <svg id="s10wires" class="abs" style="left:0;top:0" width="1920" height="1080"></svg>
+    <div id="s10nodes"></div>
+    <div class="code" id="s10code" style="left:1110px;top:610px"></div>
+  </section>
+
+  <!-- S11 AI result -->
+  <section class="scene light" id="s11">
+    <div class="frame"><div class="bar"><i></i><i></i><i></i><div class="url">ginkgo · Where could a new school go in Sepang?</div></div>
+      <div class="vp"><div class="shot" id="s11shot"><img id="s11a" src=""><img id="s11b" src="">
+        <div class="ring" id="r1"></div><div class="ring" id="r2"></div><div class="ring" id="r3"></div><div class="ring" id="r4"></div>
+        <div class="hl" id="s11hl" style="left:1525px;top:462px;width:375px;height:26px;border-radius:8px"></div>
+      </div></div></div>
+    <div class="caption" id="s11cap"></div>
+  </section>
+
+  <!-- S12 brief + pdf -->
+  <section class="scene light" id="s12">
+    <div class="frame"><div class="bar"><i></i><i></i><i></i><div class="url">ginkgo · AI-drafted planning brief</div></div>
+      <div class="vp"><div class="shot" id="s12shot"><img id="s12a" src=""></div></div></div>
+    <img id="s12pdf" class="abs" style="left:330px;top:96px;width:620px;border-radius:6px;box-shadow:0 40px 100px rgba(5,34,25,.35);transform-origin:50% 50%" src="">
+    <div class="abs" id="s12stamp" style="left:370px;top:790px;padding:14px 22px;border-radius:14px;background:var(--green);color:#fff;font-size:24px;font-weight:800;box-shadow:0 14px 30px rgba(8,160,69,.35)">✓ All 6 figures match the computed results</div>
+    <div class="caption" id="s12cap"><span class="tag">AI brief</span>One click: an AI-drafted planning brief, figure-checked, inside the PDF</div>
+  </section>
+
+  <!-- S13 trust -->
+  <section class="scene light" id="s13">
+    <div class="abs" style="left:0;right:0;top:66px;text-align:center">
+      <div class="eyebrow">Built to be trusted</div>
+      <div class="h2" style="margin-top:8px">Honest, checked and efficient</div>
+    </div>
+    <div id="s13tiles"></div>
+  </section>
+
+  <!-- S14 outro -->
+  <section class="scene dark" id="s14">
+    <div id="rain2" class="abs" style="inset:0"></div>
+    <div class="abs" style="left:0;right:0;top:250px;display:flex;flex-direction:column;align-items:center;gap:30px">
+      <div class="logo"><div class="mark">G</div><div class="word"><span>GINKGO</span></div></div>
+      <div style="font-size:40px;font-weight:600;color:#DDF5E6" id="s14tag">See the risk. Plan around it.</div>
+      <div style="display:flex;gap:16px;margin-top:10px" id="s14chips"><div class="chip-d">Map</div><div class="chip-d">Analyse</div><div class="chip-d">Ask</div><div class="chip-d">Brief</div></div>
+      <div class="credits" style="margin-top:56px" id="s14cred">
+        Data: Copernicus GLO-30 · OpenStreetMap via Overture Maps · JRC Global Surface Water · ESA WorldCover 2021 · Meta HRSL · DOSM Census 2020<br>
+        Susceptibility, not a forecast · AI scenes: scripted model replies over the app's live tools and data
+      </div>
+    </div>
+  </section>
+
+  <div id="chapters"></div>
+</div>
+
+<script>
+// ── timing helpers ──────────────────────────────────────────────────────
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const E = {
+  lin: t => t,
+  out: t => 1 - (1 - t) ** 3,
+  inOut: t => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2),
+  back: t => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * (t - 1) ** 3 + c1 * (t - 1) ** 2; },
+};
+const p = (t, a, b, e = E.out) => e(clamp((t - a) / (b - a)));
+const $ = id => document.getElementById(id);
+const set = (el, o, tf) => { if (o !== undefined) el.style.opacity = o; if (tf !== undefined) el.style.transform = tf; };
+const rise = (el, t, a, d = 0.6, dy = 40) => { const k = p(t, a, a + d); set(el, k, `translate(0, ${(1 - k) * dy}px)`); };
+const fmt = (n, d = 0) => n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+const params = new URLSearchParams(location.search);
+const A = params.get('assets') ?? 'assets/';
+
+// keyframed camera over a screenshot inside a .frame viewport (1536×864 showing 1920×1080)
+const VW = 1536, VH = 864, BASE = VW / 1920;
+function cam(el, cx, cy, z) {
+  const S = BASE * z;
+  let tx = VW / 2 - cx * S, ty = VH / 2 - cy * S;
+  tx = Math.min(0, Math.max(VW - 1920 * S, tx));
+  ty = Math.min(0, Math.max(VH - 1080 * S, ty));
+  el.style.transform = `translate(${tx}px, ${ty}px) scale(${S})`;
+}
+function camPath(el, t, keys) { // keys: [time, cx, cy, z]
+  let k = keys[0];
+  if (t <= keys[0][0]) k = keys[0];
+  else if (t >= keys[keys.length - 1][0]) k = keys[keys.length - 1];
+  else for (let i = 1; i < keys.length; i++) {
+    if (t <= keys[i][0]) {
+      const a = keys[i - 1], b = keys[i], u = E.inOut((t - a[0]) / (b[0] - a[0]));
+      k = [t, lerp(a[1], b[1], u), lerp(a[2], b[2], u), lerp(a[3], b[3], u)];
+      break;
+    }
+  }
+  cam(el, k[1], k[2], k[3]);
+}
+function caption(el, html, t, a, b) {
+  el.innerHTML = html;
+  const k = Math.min(p(t, a, a + 0.45), 1 - p(t, b - 0.45, b));
+  set(el, k, `translate(-50%, ${(1 - k) * 24}px)`);
+}
+
+// ── icons ───────────────────────────────────────────────────────────────
+const ICON = {
+  terrain: '<path d="M2 20l7-11 4 6 3-4 6 9z"/>',
+  river: '<path d="M2 8c3 0 3-2 6-2s3 2 6 2 3-2 6-2"/><path d="M2 14c3 0 3-2 6-2s3 2 6 2 3-2 6-2"/><path d="M2 20c3 0 3-2 6-2s3 2 6 2 3-2 6-2"/>',
+  drop: '<path d="M12 3s6 7 6 11a6 6 0 0 1-12 0c0-4 6-11 6-11z"/>',
+  leaf: '<path d="M5 19C5 11 11 5 20 5c0 9-6 15-14 15"/><path d="M5 19l7-7"/>',
+  people: '<circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2 20c0-3.5 2.7-6 6-6s6 2.5 6 6"/><path d="M14 15.5c1-.9 2-1.5 3-1.5 2.8 0 5 2.2 5 5"/>',
+  map: '<path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
+  doc: '<path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6M9 13h8M9 17h8"/>',
+  spark: '<path d="M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2z"/>',
+  shield: '<path d="M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
+  check: '<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',
+  bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+  swap: '<path d="M4 7h13l-3-3M20 17H7l3 3"/>',
+  wifi: '<path d="M2 9a15 15 0 0 1 20 0M5.5 12.5a10 10 0 0 1 13 0M9 16a5 5 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1"/>',
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+};
+const svg = (name, color = 'currentColor', size = 34) => `<svg class="ic" style="width:${size}px;height:${size}px;color:${color}" viewBox="0 0 24 24">${ICON[name]}</svg>`;
+
+// ── build static DOM ───────────────────────────────────────────────────
+const word = 'GINKGO';
+$('s1word').innerHTML = [...word].map(c => `<span>${c}</span>`).join('');
+function makeRain(el, n, seed) {
+  const drops = [];
+  for (let i = 0; i < n; i++) {
+    const d = document.createElement('div');
+    d.className = 'drop';
+    const r = (Math.sin(i * 12.9898 + seed) * 43758.5453) % 1;
+    const rr = Math.abs(r);
+    d.dataset.x = (i * 137.508 + seed * 50) % 1980 - 30;
+    d.dataset.v = 700 + rr * 900;
+    d.dataset.o = rr * 1400;
+    d.style.height = `${40 + rr * 70}px`;
+    d.style.opacity = 0.35 + rr * 0.5;
+    el.appendChild(d);
+    drops.push(d);
+  }
+  const ripples = [];
+  for (let i = 0; i < 10; i++) {
+    const r = document.createElement('div');
+    r.className = 'ripple';
+    r.dataset.x = 120 + ((i * 397) % 1680);
+    r.dataset.y = 900 + ((i * 53) % 140);
+    r.dataset.o = (i * 0.37) % 1.6;
+    el.appendChild(r);
+    ripples.push(r);
+  }
+  return t => {
+    for (const d of drops) {
+      const y = ((t * d.dataset.v + +d.dataset.o) % 1400) - 200;
+      d.style.transform = `translate(${+d.dataset.x - y * 0.21}px, ${y}px) rotate(12deg)`;
+    }
+    for (const r of ripples) {
+      const k = ((t + +r.dataset.o) % 1.6) / 1.6;
+      r.style.left = `${r.dataset.x}px`; r.style.top = `${r.dataset.y}px`;
+      r.style.width = r.style.height = `${20 + k * 140}px`;
+      r.style.opacity = (1 - k) * 0.7;
+    }
+  };
+}
+const rain1 = makeRain($('rain'), 90, 1);
+const rain2 = makeRain($('rain2'), 70, 7);
+
+const INPUTS = [
+  ['terrain', '#7A5C3E', '#F4ECE3', 'Copernicus GLO-30 DEM', 'terrain & elevation'],
+  ['river', '#1A73E8', '#E6F0FD', 'OpenStreetMap · Overture', 'rivers, roads, places, facilities'],
+  ['drop', '#2A78D6', '#E8F1FB', 'JRC Global Surface Water', '38 years of satellite water'],
+  ['leaf', '#0B8043', '#E3F4EA', 'ESA WorldCover 2021', 'built-up, trees, crops'],
+  ['people', '#B45309', '#FDF1E3', 'Meta HRSL + DOSM Census', 'where people live'],
+];
+$('s3in').innerHTML = INPUTS.map(([ic, c, bg, b, s], i) =>
+  `<div class="card in-card abs" id="in${i}" style="left:110px;top:${290 + i * 124}px"><div class="ico" style="background:${bg}">${svg(ic, c)}</div><div><b>${b}</b><span>${s}</span></div></div>`).join('');
+const STEPS = [
+  ['One 92 m grid', '2.1 million cells over Selangor'],
+  ['Terrain & hydrology', 'slope, flow paths, height above drainage'],
+  ['Weighted flood score', 'five inputs, one transparent formula'],
+  ['Three rain scenarios', 'Normal · Heavy · Extreme'],
+  ['Checked against history', 'places flooded in December 2021'],
+  ['Basemap & facilities', '5,725 vector tiles · 2,955 facilities'],
+];
+$('s3proc').innerHTML = STEPS.map(([b, s], i) => `<div class="step" id="sp${i}"><div class="n">${i + 1}</div><div>${b}<small>${s}</small></div></div>`).join('');
+const OUTS = [['map', 'Live flood map', 'Google-style, works offline'], ['doc', 'Reports & exports', 'daerah, drawn areas, PDF, GeoJSON'], ['spark', 'AI answers', 'grounded in the computed data']];
+$('s3out').innerHTML = OUTS.map(([ic, b, s], i) =>
+  `<div class="card out-card abs" id="out${i}" style="left:1410px;top:${330 + i * 172}px"><div class="ico">${svg(ic, '#067A35', 38)}</div><div><b>${b}</b><span>${s}</span></div></div>`).join('');
+// wires: inputs → process, process → outputs
+const W3 = [];
+INPUTS.forEach((_, i) => W3.push({ x1: 580, y1: 342 + i * 124, x2: 680, y2: 560, at: 2.2 + i * 0.12 }));
+OUTS.forEach((_, i) => W3.push({ x1: 1240, y1: 560, x2: 1410, y2: 396 + i * 172, at: 8.6 + i * 0.15 }));
+$('s3wires').innerHTML = W3.map((w, i) => {
+  const mx = (w.x1 + w.x2) / 2;
+  return `<path id="w3_${i}" d="M${w.x1} ${w.y1} C${mx} ${w.y1} ${mx} ${w.y2} ${w.x2} ${w.y2}" stroke="#08A045" stroke-width="3" fill="none" stroke-dasharray="8 8" opacity="0"/>
+          <circle id="d3_${i}" r="7" fill="#08A045" opacity="0"/>`;
+}).join('');
+
+const TERMS = [
+  ['Height above drainage', 35, '#0B5D35', 0.235], ['Near a river or canal', 20, '#0B8043', 0.164],
+  ['Flat ground', 15, '#18A058', 0.150], ['Low elevation', 15, '#34B76E', 0.120], ['Water history 1984–2021', 15, '#5CC98A', 0.000],
+];
+$('wbar').innerHTML = TERMS.map(([n, w, c], i) => `<div class="wseg" id="ws${i}" style="background:${c};width:0"><b>${w}%</b><span>${n}</span></div>`).join('');
+
+const NODES = [
+  { x: 330, y: 360, b: 'You ask', s: 'question + what the map shows' },
+  { x: 800, y: 360, b: 'Ginkgo proxy', s: 'OpenRouter or Claude API · key stays on the server' },
+  { x: 1270, y: 360, b: 'AI plans', s: 'which tools to call, in parallel' },
+  { x: 1580, y: 650, b: '11 tools in your browser', s: 'run on the same flood grid as the map' },
+  { x: 1150, y: 900, b: 'Map updates', s: 'scenario, daerah, layers, sites' },
+  { x: 600, y: 900, b: 'Every figure checked', s: 'against the tool results' },
+];
+const TOOLS = ['search_places', 'get_current_view', 'analyse_location', 'get_daerah_profile', 'query_point', 'rank_daerah',
+  'list_facilities_at_risk', 'get_method_and_validation', 'set_map_view', 'find_candidate_sites', 'show_on_map'];
+const USED = ['set_map_view', 'find_candidate_sites'];
+$('s10nodes').innerHTML = NODES.map((n, i) => `<div class="node${i === 3 ? ' box' : ''}" id="nd${i}" style="left:${n.x}px;top:${n.y}px"><div class="nn">${i + 1}</div><b>${n.b}</b><span>${n.s}</span>` +
+  (i === 3 ? `<div class="tools">${TOOLS.map((t, j) => `<i class="tchip" id="tc${j}">${t}</i>`).join('')}</div>` : '') + '</div>').join('');
+const LOOP = NODES.map((n, i) => [n, NODES[(i + 1) % NODES.length]]);
+$('s10wires').innerHTML = LOOP.slice(0, 5).map(([a, b], i) =>
+  `<line id="lw${i}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#C9D3CE" stroke-width="4" stroke-dasharray="10 10"/>`).join('') +
+  LOOP.slice(0, 5).map((_, i) => `<circle id="lp${i}" r="11" fill="#08A045" opacity="0"/>`).join('');
+const CODE = [
+  '<span class="k">set_map_view</span>(scenario=<span class="s">"extreme"</span>,',
+  '             daerah=<span class="s">"Sepang"</span>, layers_on=[<span class="s">"schools"</span>])',
+  '<span class="k">find_candidate_sites</span>(daerah=<span class="s">"Sepang"</span>,',
+  '             min_area_ha=5, low_under=<span class="s">"extreme"</span>)',
+];
+
+const TILES = [
+  ['target', 'Susceptibility, not forecast', 'Shows where flooding is more likely — never when, no depths or return periods.'],
+  ['shield', 'Checked against history', '4 of 7 places flooded in Dec 2021 score High; 2 of 2 hilly controls score Low.'],
+  ['check', 'Every AI figure verified', 'Numbers in an answer must match the tool results, or they are highlighted.'],
+  ['bolt', 'Efficient AI', 'Prompt caching and a shared answer cache; each answer shows its tokens and cost.'],
+  ['swap', 'Any model, one setting', 'Runs on OpenRouter or the Claude API — switch without code changes.'],
+  ['wifi', 'Works offline', 'Self-hosted map and data; without an AI key it falls back to template answers.'],
+];
+$('s13tiles').innerHTML = TILES.map(([ic, b, s], i) =>
+  `<div class="tile" id="tl${i}" style="left:${150 + (i % 3) * 560}px;top:${270 + Math.floor(i / 3) * 290}px"><div class="ico">${svg(ic, '#067A35', 36)}</div><b>${b}</b><span>${s}</span></div>`).join('');
+
+const CHAPTERS = ['Data', 'Map', 'Scenarios', 'Analyse', 'Ask AI', 'Trust'];
+$('chapters').innerHTML = CHAPTERS.map((c, i) => `<div class="ch" id="ch${i}"><div class="t">${c}</div><div class="b"><i id="chb${i}"></i></div></div>`).join('');
+
+// ── scenes ──────────────────────────────────────────────────────────────
+const SCENES = [
+  { id: 's1', dur: 6.5, update(t) {
+    rain1(t);
+    set($('s1mark'), p(t, 0.4, 1.2, E.back), `scale(${lerp(0.4, 1, p(t, 0.4, 1.2, E.back))})`);
+    [...$('s1word').children].forEach((c, i) => rise(c, t, 1.0 + i * 0.08, 0.5, 30));
+    rise($('s1tag'), t, 2.0, 0.7); rise($('s1sub'), t, 2.6, 0.7);
+  } },
+  { id: 's2', dur: 9.5, ch: 0, update(t) {
+    rise($('s2eye'), t, 0.2); rise($('s2h'), t, 0.4, 0.8, 50);
+    const cards = [['st1', 'n1', 6.99, 2, 'M', ''], ['st2', 'n2', 24.1, 1, '%', ''], ['st3', 'n3', 1.93, 2, 'M', '~']];
+    cards.forEach(([c, n, v, d, suf, pre], i) => {
+      const a = 2.0 + i * 0.55;
+      rise($(c), t, a, 0.7, 60);
+      $(n).textContent = pre + fmt(v * p(t, a + 0.2, a + 1.8), d) + suf;
+    });
+  } },
+  { id: 's3', dur: 13.5, ch: 0, update(t) {
+    INPUTS.forEach((_, i) => { const k = p(t, 0.6 + i * 0.2, 1.2 + i * 0.2); set($(`in${i}`), k, `translate(${(1 - k) * -60}px, 0)`); });
+    rise($('s3t0'), t, 0.4, 0.5, 20); rise($('s3t1'), t, 1.5, 0.5, 20); rise($('s3t2'), t, 8.5, 0.5, 20);
+    const box = p(t, 1.6, 2.3);
+    set($('s3proc'), box, `scale(${lerp(0.94, 1, box)})`);
+    STEPS.forEach((_, i) => {
+      const a = 2.8 + i * 0.85;
+      $(`sp${i}`).classList.toggle('on', t > a);
+      set($(`sp${i}`), lerp(0.35, 1, p(t, a - 0.3, a)));
+    });
+    OUTS.forEach((_, i) => { const k = p(t, 8.7 + i * 0.3, 9.4 + i * 0.3); set($(`out${i}`), k, `translate(${(1 - k) * 60}px, 0) scale(${lerp(0.96, 1, k)})`); });
+    W3.forEach((w, i) => {
+      const path = $(`w3_${i}`), dot = $(`d3_${i}`);
+      const on = p(t, w.at, w.at + 0.5);
+      path.setAttribute('opacity', on * 0.7);
+      path.setAttribute('stroke-dashoffset', -t * 30);
+      if (on > 0) {
+        const L = path.getTotalLength();
+        const u = ((t - w.at) * 0.55 + i * 0.13) % 1;
+        const pt = path.getPointAtLength(u * L);
+        dot.setAttribute('cx', pt.x); dot.setAttribute('cy', pt.y); dot.setAttribute('opacity', on);
+      } else dot.setAttribute('opacity', 0);
+    });
+  } },
+  { id: 's4', dur: 7.5, ch: 0, update(t) {
+    TERMS.forEach(([, w], i) => { const k = p(t, 0.6 + i * 0.35, 1.3 + i * 0.35); $(`ws${i}`).style.width = `${w * 15 * k}px`; });
+    rise($('s4ex'), t, 2.6);
+    const parts = TERMS.map(([, , , v]) => v.toFixed(3));
+    const shown = Math.floor(clamp((t - 3.0) / 0.25, 0, 5));
+    $('s4sum').innerHTML = shown ? parts.slice(0, shown).join(' + ') + (shown === 5 ? ' = <b style="color:var(--high)">0.669</b>' : '') : '';
+    rise($('s4g'), t, 3.6, 0.6, 30);
+    const g = p(t, 4.4, 5.6, E.inOut);
+    $('gfill').style.width = `${66.9 * g}%`;
+    $('s4score').textContent = (0.669 * g).toFixed(2);
+    rise($('s4res'), t, 4.3);
+  } },
+  { id: 's5', dur: 13, ch: 1, update(t) {
+    const f = Math.round(clamp((t - 0.6) / 10, 0, 1) * 299);
+    $('fly').dataset.want = `${A}fly/f_${String(f).padStart(3, '0')}.jpg`;
+    const hold = p(t, 10.6, 13, E.lin);
+    $('fly').style.transform = `scale(${1 + hold * 0.04})`;
+    rise($('s5badge'), t, 0.5, 0.6, -20); rise($('s5leg'), t, 0.8, 0.6, -20);
+    const cap = $('s5cap');
+    if (t < 4.6) caption(cap, '<span class="tag">Map</span>A Google-style map of Selangor — <span class="hi">self-hosted, works offline</span>', t, 0.6, 4.6);
+    else if (t < 8.6) caption(cap, '<span class="tag">Map</span>5,725 vector tiles: streets, rivers, rail lines and place names', t, 4.6, 8.6);
+    else caption(cap, '<span class="tag">Map</span>The flood layer sits <span class="hi">under the streets</span> — Klang river, street level', t, 8.6, 13);
+  } },
+  { id: 's6', dur: 8.5, ch: 2, update(t) {
+    camPath($('s6shot'), t, [[0, 960, 540, 1], [8.5, 900, 560, 1.06]]);
+    const kb = p(t, 2.6, 3.2, E.inOut), kc = p(t, 5.3, 5.9, E.inOut);
+    set($('s6b'), kb); set($('s6c'), kc);
+    const v = t < 2.6 ? 24.1 : t < 5.3 ? lerp(24.1, 30.4, kb) : lerp(30.4, 36.3, kc);
+    $('s6num').textContent = `${v.toFixed(1)}%`;
+    ['p1', 'p2', 'p3'].forEach((id, i) => $(id).classList.toggle('on', (t < 2.9 ? 0 : t < 5.6 ? 1 : 2) === i));
+    rise($('s6card'), t, 0.6, 0.7, 50);
+    const c = $('s6cap'); const k = Math.min(p(t, 0.8, 1.3), 1 - p(t, 8.0, 8.5)); set(c, k, `translate(-50%, ${(1 - k) * 24}px)`);
+  } },
+  { id: 's7', dur: 7, ch: 3, update(t) {
+    camPath($('s7shot'), t, [[0, 960, 540, 1], [1.2, 960, 540, 1], [6.5, 1010, 520, 1.55]]);
+    rise($('s7card'), t, 1.4, 0.7, 50);
+    $('s7n').textContent = Math.round(32 * p(t, 1.6, 3.0));
+    const c = $('s7cap'); const k = Math.min(p(t, 0.6, 1.1), 1 - p(t, 6.5, 7)); set(c, k, `translate(-50%, ${(1 - k) * 24}px)`);
+  } },
+  { id: 's8', dur: 10, ch: 3, update(t) {
+    const from = META.draw.from, to = META.draw.to;
+    // cursor: enter → press at start → drag to end → release
+    const ax = from.x - 220, ay = from.y - 160;
+    const m1 = p(t, 0.5, 1.6, E.inOut), m2 = p(t, 1.9, 3.3, E.inOut);
+    const cx = m2 > 0 ? lerp(from.x, to.x, m2) : lerp(ax, from.x, m1);
+    const cy = m2 > 0 ? lerp(from.y, to.y, m2) : lerp(ay, from.y, m1);
+    set($('s8cur'), p(t, 0.3, 0.6) * (1 - p(t, 3.9, 4.2)), `translate(${cx}px, ${cy}px)`);
+    const pr = p(t, 1.6, 1.9) * (1 - p(t, 3.3, 3.6));
+    $('s8press').style.left = `${cx}px`; $('s8press').style.top = `${cy}px`; set($('s8press'), pr);
+    const r = $('s8rect');
+    r.style.left = `${Math.min(from.x, cx)}px`; r.style.top = `${Math.min(from.y, cy)}px`;
+    r.style.width = `${Math.abs(cx - from.x)}px`; r.style.height = `${Math.abs(cy - from.y)}px`;
+    set(r, m2 > 0 ? 1 - p(t, 3.6, 3.9) : 0);
+    set($('s8b'), p(t, 3.5, 3.9));
+    camPath($('s8shot'), t, [[0, 900, 600, 1.25], [3.6, 900, 630, 1.25], [5.2, 1700, 250, 1.75], [10, 1700, 270, 1.8]]);
+    const hl = p(t, 5.4, 5.9) * (1 - p(t, 8.6, 9.0)); set($('s8hl'), hl);
+    rise($('s8card'), t, 6.0, 0.7, 50);
+    const c = $('s8cap'); const k = Math.min(p(t, 0.6, 1.1), 1 - p(t, 9.5, 10)); set(c, k, `translate(-50%, ${(1 - k) * 24}px)`);
+  } },
+  { id: 's9', dur: 7.5, ch: 4, update(t) {
+    const n = META.typeFrames;
+    const f = Math.min(n - 1, Math.floor(clamp((t - 0.8) / 3.4) * n));
+    $('s9t').dataset.want = `${A}type/t_${String(f).padStart(2, '0')}.png`;
+    set($('s9b'), p(t, 5.4, 5.9));
+    camPath($('s9shot'), t, [[0, 960, 540, 1], [0.8, 560, 120, 2.4], [5.0, 560, 120, 2.4], [6.3, 1500, 300, 1.35], [7.5, 1500, 300, 1.35]]);
+    const c = $('s9cap'); const k = Math.min(p(t, 0.6, 1.1), 1 - p(t, 7.0, 7.5)); set(c, k, `translate(-50%, ${(1 - k) * 24}px)`);
+  } },
+  { id: 's10', dur: 9.5, ch: 4, update(t) {
+    NODES.forEach((_, i) => {
+      const a = 0.4 + i * 0.35;
+      const k = p(t, a, a + 0.5, E.back);
+      set($(`nd${i}`), clamp(k), `translate(-50%, -50%) scale(${lerp(0.7, 1, k)})`);
+    });
+    // a packet travels the loop: node i → i+1, one hop per 0.9 s, starting at 2.6 s
+    const hop = (t - 2.6) / 0.9;
+    NODES.forEach((_, i) => $(`nd${i}`).classList.toggle('on', hop >= i - 0.5 && hop < i + 0.5 + (i === 5 ? 9 : 0)));
+    LOOP.slice(0, 5).forEach(([a, b], i) => {
+      const u = hop - i;
+      const dot = $(`lp${i}`);
+      $(`lw${i}`).setAttribute('stroke', hop > i ? '#08A045' : '#C9D3CE');
+      $(`lw${i}`).setAttribute('stroke-dashoffset', -t * 40);
+      if (u >= 0 && u <= 1) {
+        const e = E.inOut(u);
+        dot.setAttribute('cx', lerp(a.x, b.x, e)); dot.setAttribute('cy', lerp(a.y, b.y, e)); dot.setAttribute('opacity', 1);
+      } else dot.setAttribute('opacity', 0);
+    });
+    // the two tools this question needs light up when the plan reaches the browser
+    TOOLS.forEach((name, i) => { const k = p(t, 1.6 + i * 0.06, 2.0 + i * 0.06, E.back); set($(`tc${i}`), clamp(k), `scale(${lerp(0.6, 1, k)})`);
+      $(`tc${i}`).classList.toggle('used', USED.includes(name) && hop >= 2.6); });
+    // tool calls typed out
+    const chars = Math.floor(clamp((t - 4.4) / 2.2) * 200);
+    let left = chars, html = '';
+    for (const line of CODE) {
+      const plain = line.replace(/<[^>]+>/g, '');
+      if (left <= 0) break;
+      if (left >= plain.length) { html += line + '\n'; left -= plain.length; }
+      else { html += plain.slice(0, left); left = 0; }
+    }
+    $('s10code').innerHTML = html || ' ';
+    set($('s10code'), p(t, 4.2, 4.6), `translate(-50%, 0)`);
+    $('s10code').style.left = '820px'; $('s10code').style.top = '510px';
+  } },
+  { id: 's11', dur: 10.5, ch: 4, update(t) {
+    set($('s11b'), p(t, 0.3, 1.2));
+    camPath($('s11shot'), t, [[0, 900, 560, 1.15], [1.2, 900, 560, 1.15], [3.0, 900, 582, 1.32], [5.6, 900, 582, 1.32], [7.2, 1700, 380, 1.9], [10.5, 1700, 400, 1.95]]);
+    const pins = [[975, 600], [985, 234], [740, 439], [1025, 930]];
+    pins.forEach(([x, y], i) => {
+      const a = 2.0 + i * 0.35;
+      const k = p(t, a, a + 0.5, E.back);
+      const pulse = (Math.sin((t - a) * 5) + 1) / 2;
+      const r = $(`r${i + 1}`);
+      r.style.left = `${x}px`; r.style.top = `${y}px`;
+      r.style.width = r.style.height = `${(90 + pulse * 16) * k}px`;
+      set(r, clamp(k) * (1 - p(t, 6.4, 6.9)));
+    });
+    set($('s11hl'), p(t, 7.6, 8.1));
+    const cap = $('s11cap');
+    if (t < 5.8) caption(cap, '<span class="tag">Ask AI</span>The AI switched to Extreme rain, selected Sepang and pinned <span class="hi">4 sites that stay Low</span>', t, 0.5, 5.8);
+    else caption(cap, '<span class="tag">Ask AI</span><span class="hi">✓ All 13 figures</span> in the answer match the computed data', t, 5.8, 10.5);
+  } },
+  { id: 's12', dur: 8, ch: 4, update(t) {
+    camPath($('s12shot'), t, [[0, 1500, 330, 1.6], [8, 1500, 360, 1.7]]);
+    const k = p(t, 1.6, 2.6, E.out);
+    set($('s12pdf'), k, `translate(${(1 - k) * -420}px, ${(1 - k) * 30}px) rotate(${lerp(-8, 2, k)}deg)`);
+    const s = p(t, 3.0, 3.5, E.back);
+    set($('s12stamp'), clamp(s), `scale(${lerp(0.6, 1, s)}) rotate(-3deg)`);
+    const c = $('s12cap'); const kk = Math.min(p(t, 0.6, 1.1), 1 - p(t, 7.5, 8)); set(c, kk, `translate(-50%, ${(1 - kk) * 24}px)`);
+  } },
+  { id: 's13', dur: 9, ch: 5, update(t) {
+    TILES.forEach((_, i) => { const a = 0.5 + i * 0.3; const k = p(t, a, a + 0.6, E.back); set($(`tl${i}`), clamp(k), `translate(0, ${(1 - k) * 50}px) scale(${lerp(0.94, 1, k)})`); });
+  } },
+  { id: 's14', dur: 6.5, update(t) {
+    rain2(t);
+    rise($('s14tag'), t, 0.5); rise($('s14chips'), t, 1.0); rise($('s14cred'), t, 1.6);
+  } },
+];
+const OVERLAP = 0.5;
+let acc = 0;
+for (const s of SCENES) { s.start = acc; acc += s.dur - OVERLAP; }
+window.FILM_DURATION = acc + OVERLAP;
+const CH_RANGE = CHAPTERS.map((_, c) => {
+  const sc = SCENES.filter(s => s.ch === c);
+  return [sc[0].start, sc[sc.length - 1].start + sc[sc.length - 1].dur];
+});
+
+let META = { draw: { from: { x: 792, y: 539 }, to: { x: 1028, y: 734 } }, typeFrames: 19 };
+
+window.renderAt = async (t) => {
+  const waits = [];
+  for (const s of SCENES) {
+    const el = $(s.id);
+    const lt = t - s.start;
+    if (lt < 0 || lt > s.dur) { el.style.opacity = 0; el.style.visibility = 'hidden'; continue; }
+    el.style.visibility = 'visible';
+    const a = s === SCENES[0] ? 1 : p(lt, 0, OVERLAP, E.inOut);
+    const b = s === SCENES[SCENES.length - 1] ? 1 : 1 - p(lt, s.dur - OVERLAP, s.dur, E.inOut);
+    el.style.opacity = Math.min(a, b);
+    s.update(lt);
+  }
+  // swap frame images once decoded
+  for (const img of document.querySelectorAll('img[data-want]')) {
+    if (img.dataset.want && img.getAttribute('src') !== img.dataset.want) {
+      img.src = img.dataset.want;
+      waits.push(img.decode().catch(() => {}));
+    }
+  }
+  // chapter bar
+  const bar = $('chapters');
+  const on = t > SCENES[1].start + 0.3 && t < SCENES[SCENES.length - 1].start + 0.2;
+  bar.style.opacity = on ? 1 : 0;
+  const cur = SCENES.find(s => t >= s.start && t < s.start + s.dur - OVERLAP) ?? SCENES[SCENES.length - 1];
+  bar.classList.toggle('ondark', cur.id === 's5');
+  CH_RANGE.forEach(([a, b], i) => {
+    $(`chb${i}`).style.width = `${clamp((t - a) / (b - a)) * 100}%`;
+    $(`ch${i}`).classList.toggle('on', t >= a && t < b);
+  });
+  await Promise.all(waits);
+};
+
+window.filmReady = (async () => {
+  try { META = await (await fetch(`${A}meta.json`)).json(); } catch { /* defaults above */ }
+  const still = { s6a: 'app_normal.png', s6b: 'app_heavy.png', s6c: 'app_extreme.png', s7a: 'app_klang.png',
+    s8a: 'draw_before.png', s8b: 'draw_after.png', s9b: 'ai_0.png', s11a: 'ai_1.png', s11b: 'ai_2.png', s12a: 'brief.png', s12pdf: 'pdf-1.png' };
+  await Promise.all(Object.entries(still).map(([id, f]) => { $(id).src = A + f; return $(id).decode().catch(() => console.warn('missing', f)); }));
+  await document.fonts.ready;
+  return true;
+})();
+</script>
+</body>
+</html>
