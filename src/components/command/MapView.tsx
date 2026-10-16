@@ -1,19 +1,29 @@
-// Ginkgo Command Center — centre map (Leaflet).
-// Shows precomputed layers, lets the user pick a daerah, inspect a cell, and
-// draw a rectangle or polygon. All numbers shown come from the grid.
+// Ginkgo Command Center — centre map (MapLibre GL over a self-hosted,
+// Google-Maps-style vector basemap). Shows precomputed layers, lets the user
+// pick a daerah, inspect a cell, and draw a rectangle or polygon. All numbers
+// shown come from the grid.
 
 import { useEffect, useLayoutEffect, useRef, type FC } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import type { Feature } from 'geojson';
+import {
+  addProtocol, AttributionControl, LngLatBounds, Map as MLMap, Marker, NavigationControl, Popup, ScaleControl, setWorkerUrl,
+  type ExpressionSpecification, type FilterSpecification, type GeoJSONSource, type ImageSource, type LayerSpecification, type LngLat, type MapGeoJSONFeature,
+  type MapMouseEvent, type MapTouchEvent, type StyleSpecification,
+} from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
+// MapLibre parses tiles in a module worker; let Vite bundle it and hand over its URL
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+import { Protocol } from 'pmtiles';
+import type { Feature, FeatureCollection, Point } from 'geojson';
 import { classOf, CLASS_NAME, queryCell, type CellInfo, type Ring } from '../../data/analysis';
-import { fmtCoord, fmtInt, RAIL_NEUTRAL, RISK_COLOR, RIVER_COLOR } from '../../data/format';
+import { fmtCoord, fmtInt, RISK_COLOR, RIVER_COLOR } from '../../data/format';
 import { googleCopyright, googleSession, googleTileUrl, type GoogleMapType } from '../../data/googleTiles';
-import { builtCanvas, canvasToUrl, classCanvas, gridBounds, historyCanvas, safeCanvas } from '../../data/overlays';
-import type { AppDataBundle, Facility, FacilityKind, Grid, RiskClass, Scenario } from '../../data/types';
+import { builtCanvas, canvasToUrl, classCanvas, gridCorners, historyCanvas, safeCanvas } from '../../data/overlays';
+import type { AppDataBundle, FacilityKind, Grid, RiskClass, Scenario } from '../../data/types';
+import { makeIcon } from '../../map/icons';
+import { BASE_GROUP, basemapStyle, bundledUrls, SLOT_MARKERS, SLOT_RASTER, SLOT_VECTOR, type BaseVariant } from '../../map/style';
 
 export type DrawMode = 'none' | 'rect' | 'poly';
-export type Basemap = 'streets' | 'light' | 'osm' | 'google' | 'google-sat' | 'none';
+export type Basemap = 'streets' | 'light' | 'google' | 'google-sat' | 'none';
 export interface LayerState {
   susceptibility: boolean;
   showLow: boolean;
@@ -29,8 +39,10 @@ export interface LayerState {
   school: boolean;
   emergency: boolean;
 }
+/** bounds as [[south, west], [north, east]]; point as [lat, lon]. */
 export interface MapFocus { bounds: [[number, number], [number, number]]; label: string; point: [number, number]; token: number }
-export interface MapInspect { lat: number; lon: number; title?: string; token: number }
+export interface MapInspect { lat: number; lon: number; title?: string; me?: boolean; token: number }
+export interface MapPadding { top: number; bottom: number; left: number; right: number }
 
 interface Props {
   bundle: AppDataBundle;
@@ -45,6 +57,8 @@ interface Props {
   focus: MapFocus | null;
   inspect: MapInspect | null;
   resetToken: number;
+  /** room taken by floating chrome, so fitted views are not hidden under it */
+  padding: MapPadding;
   onSelectDaerah: (id: number | null) => void;
   onDrawn: (rings: Ring[]) => void;
   onDrawModeChange: (m: DrawMode) => void;
@@ -52,36 +66,43 @@ interface Props {
   onBasemapError: (message: string) => void;
 }
 
-type TileBase = Exclude<Basemap, 'none' | 'google' | 'google-sat'>;
-const TILES: Record<TileBase, [string, L.TileLayerOptions]> = {
-  // CARTO Voyager: OpenStreetMap data in a soft, Google-like street style
-  streets: ['https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    maxZoom: 20, subdomains: 'abcd',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-  }],
-  light: ['https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 20, subdomains: 'abcd',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-  }],
-  osm: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }],
-};
-
-const DATA_ATTRIBUTION = 'Layers: Copernicus GLO-30, JRC GSW, ESA WorldCover, Meta HRSL, Overture Maps';
+const DATA_ATTRIBUTION = 'Flood model: Copernicus GLO-30 · JRC GSW · ESA WorldCover · Meta HRSL';
 const KIND_LABEL: Record<FacilityKind, string> = {
   hospital: 'Hospital', clinic: 'Clinic', school: 'School', police: 'Police station', fire: 'Fire & rescue', station: 'Rail station',
 };
-const KIND_RADIUS: Record<FacilityKind, number> = { hospital: 7, clinic: 4, school: 4.5, police: 5, fire: 5.5, station: 5 };
-const LAYER_KINDS: Record<'hospital' | 'clinic' | 'school' | 'emergency' | 'rail', FacilityKind[]> = {
-  hospital: ['hospital'], clinic: ['clinic'], school: ['school'], emergency: ['police', 'fire'], rail: ['station'],
+const LAYER_KINDS: Record<'hospital' | 'clinic' | 'school' | 'emergency', FacilityKind[]> = {
+  hospital: ['hospital'], clinic: ['clinic'], school: ['school'], emergency: ['police', 'fire'],
 };
+const DRAW_COLOR = '#1A73E8';
+const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
+const RASTERS = ['built', 'risk', 'history', 'safe'] as const;
+type RasterId = typeof RASTERS[number];
+const INTERACTIVE = ['fac-icons', 'fac-stations', 'sites-circle', 'rail-line', 'daerah-fill'];
 
+let protocolReady = false;
+function ensureProtocol() {
+  if (protocolReady) return;
+  setWorkerUrl(workerUrl);
+  addProtocol('pmtiles', new Protocol().tile);
+  protocolReady = true;
+}
+
+// ── small DOM helpers (popups/tooltips are built as nodes: OSM names are untrusted) ──
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (text !== undefined) e.textContent = text;
   return e;
+}
+function lines(...rows: (string | [string, 'strong' | 'em'])[]): HTMLElement {
+  const box = el('div');
+  rows.forEach((r, i) => {
+    if (i) box.append(el('br'));
+    if (typeof r === 'string') box.append(document.createTextNode(r));
+    else box.append(el(r[1], undefined, r[0]));
+  });
+  return box;
 }
 
 function riskChip(cls: string): HTMLElement {
@@ -113,56 +134,233 @@ function cellPopup(info: CellInfo, sc: Scenario, onAsk: () => void, title?: stri
   add('Built-up', `${info.built}%`);
   add('People (est.)', info.pop < 1 ? '0' : `~${fmtInt(info.pop)}`);
   root.append(dl);
-  const coords = el('div', 'muted', fmtCoord(info.lonlat));
-  coords.style.fontSize = '10px';
-  coords.style.marginTop = '4px';
-  root.append(coords);
+  root.append(el('div', 'coords', fmtCoord(info.lonlat)));
   const actions = el('div', 'actions');
-  const ask = el('button', 'btn btn-subtle btn-sm', 'Ask copilot about this spot');
+  const ask = el('button', 'btn btn-subtle btn-sm', '✦ Ask Ginkgo about this spot');
   ask.onclick = onAsk;
   actions.append(ask);
   root.append(actions);
   return root;
 }
 
-function facilityStyle(f: Facility, sc: Scenario): L.CircleMarkerOptions {
-  const c = classOf(f.s, sc);
-  const fill = c === 3 ? RISK_COLOR.High : c === 2 ? RISK_COLOR.Moderate : '#FFFFFF';
-  return { radius: KIND_RADIUS[f.k], weight: f.k === 'hospital' ? 2.5 : 1.6, color: '#111111', fillColor: fill, fillOpacity: 1 };
+function pinElement(label: string, me: boolean): HTMLElement {
+  const root = el('div', me ? 'gm-me' : 'gm-pin');
+  if (me) {
+    root.append(el('span', 'halo'), el('span', 'dot'));
+  } else {
+    root.innerHTML = '<svg viewBox="0 0 27 43" width="27" height="43" aria-hidden="true"><path d="M13.5 0C6 0 0 6 0 13.4 0 23.5 13.5 43 13.5 43S27 23.5 27 13.4C27 6 21 0 13.5 0z" fill="#EA4335"/><path d="M13.5 1.2c6.8 0 12.3 5.4 12.3 12.2 0 8.6-10.2 24.4-12.3 27.6C11.4 37.8 1.2 22 1.2 13.4 1.2 6.6 6.7 1.2 13.5 1.2z" fill="none" stroke="#B31412" stroke-width="1.2" opacity=".55"/><circle cx="13.5" cy="13.5" r="4.6" fill="#7A0E0E"/></svg>';
+  }
+  root.append(el('span', 'gm-pin-label', label));
+  return root;
 }
+
+const ringBounds = (ring: [number, number][]) => {
+  const b = new LngLatBounds();
+  ring.forEach(p => b.extend(p));
+  return b;
+};
+
+/** Label points for the daerah: the daerah's own cell nearest its cell centroid (always inside). */
+function daerahLabels(bundle: AppDataBundle): FeatureCollection<Point> {
+  const { meta, daerah } = bundle.grid;
+  const sum = Array.from({ length: 10 }, () => [0, 0, 0]);
+  for (let i = 0; i < daerah.length; i++) {
+    const d = daerah[i];
+    if (d < 1 || d > 9) continue;
+    sum[d][0] += i % meta.width; sum[d][1] += Math.floor(i / meta.width); sum[d][2]++;
+  }
+  const best = sum.map(([cx, cy, n]) => ({ cx: cx / n, cy: cy / n, d: Infinity, i: -1 }));
+  for (let i = 0; i < daerah.length; i++) {
+    const d = daerah[i];
+    if (d < 1 || d > 9) continue;
+    const b = best[d];
+    const dd = (i % meta.width - b.cx) ** 2 + (Math.floor(i / meta.width) - b.cy) ** 2;
+    if (dd < b.d) { b.d = dd; b.i = i; }
+  }
+  return {
+    type: 'FeatureCollection',
+    features: bundle.stats.daerah.map(s => {
+      const i = best[s.id].i;
+      const lon = meta.x0 + (i % meta.width + 0.5) * meta.res;
+      const lat = meta.y1 - (Math.floor(i / meta.width) + 0.5) * meta.res;
+      return { type: 'Feature', properties: { name: s.name }, geometry: { type: 'Point', coordinates: [lon, lat] } };
+    }),
+  };
+}
+
+/** Map labels use the bundled Latin glyphs only; other scripts are dropped from the label (not the tooltip). */
+const NON_LATIN = /[^\u0020-\u02ff\u1e00-\u1eff\u2000-\u206f]/g;
+const labelText = (s: string) => s.replace(NON_LATIN, '').replace(/\(\s*\)|\s{2,}/g, ' ').trim();
+
+function facilityData(bundle: AppDataBundle, sc: Scenario): FeatureCollection<Point> {
+  return {
+    type: 'FeatureCollection',
+    features: bundle.facilities.items.map((f, i) => ({
+      type: 'Feature', id: i,
+      // facilities in the federal territories are outside the analysis: neutral pin
+      properties: { i, k: f.k, n: f.n, label: labelText(f.n), c: f.d >= 1 && f.d <= 9 ? classOf(f.s, sc) : 0 },
+      geometry: { type: 'Point', coordinates: f.c },
+    })),
+  };
+}
+
+function siteData(bundle: AppDataBundle): FeatureCollection<Point> {
+  return {
+    type: 'FeatureCollection',
+    features: bundle.validation.sites.map((s, i) => ({
+      type: 'Feature', id: i,
+      properties: { i, name: labelText(s.name), flood: s.kind === 'reported_flood' ? 1 : 0 },
+      geometry: { type: 'Point', coordinates: s.lonlat },
+    })),
+  };
+}
+
+/** Every app source and layer; inserted at the base style's slots. */
+function addAppLayers(m: MLMap, bundle: AppDataBundle) {
+  const corners = gridCorners(bundle.grid.meta);
+  const rasterOpacity: Record<RasterId, unknown> = {
+    built: 0.55,
+    risk: ['interpolate', ['linear'], ['zoom'], 7, 0.62, 11, 0.5, 14, 0.42, 17, 0.36],
+    history: 0.8,
+    safe: 0.7,
+  };
+  for (const id of RASTERS) {
+    m.addSource(id, { type: 'image', url: BLANK_PNG, coordinates: corners });
+    add(m, {
+      id: `${id}-layer`, type: 'raster', source: id, layout: { visibility: 'none' },
+      paint: { 'raster-opacity': rasterOpacity[id], 'raster-resampling': 'linear', 'raster-fade-duration': 0 },
+    } as LayerSpecification, SLOT_RASTER);
+  }
+
+  const railColor = ['match', ['get', 'k'], ...Object.entries(bundle.rail.lines).flatMap(([k, v]) => [k, v.color]), '#6B7280'] as unknown as ExpressionSpecification;
+  m.addSource('rivers', { type: 'geojson', data: bundle.rivers });
+  m.addSource('daerah', { type: 'geojson', data: bundle.daerah, promoteId: 'id' });
+  m.addSource('daerah-labels', { type: 'geojson', data: daerahLabels(bundle) });
+  m.addSource('rail', { type: 'geojson', data: bundle.rail });
+  m.addSource('drawn', { type: 'geojson', data: EMPTY });
+  m.addSource('draft', { type: 'geojson', data: EMPTY });
+  m.addSource('facilities', { type: 'geojson', data: EMPTY });
+  m.addSource('sites', { type: 'geojson', data: siteData(bundle) });
+
+  const vec: LayerSpecification[] = [
+    { id: 'rivers-line', type: 'line', source: 'rivers', layout: { visibility: 'none', 'line-cap': 'round' },
+      paint: { 'line-color': RIVER_COLOR, 'line-opacity': 0.85,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 8, ['match', ['get', 'c'], 'river', 1.2, 0.5], 14, ['match', ['get', 'c'], 'river', 3, 'canal', 2, 1.2]] } },
+    { id: 'daerah-fill', type: 'fill', source: 'daerah',
+      paint: {
+        'fill-color': ['case', ['boolean', ['get', 'excluded'], false], '#9AA0A6', '#202124'],
+        'fill-opacity': ['case', ['boolean', ['get', 'excluded'], false], 0.16,
+          ['boolean', ['feature-state', 'dim'], false], 0.07, ['boolean', ['feature-state', 'hover'], false], 0.035, 0],
+      } },
+    { id: 'daerah-line', type: 'line', source: 'daerah', layout: { 'line-join': 'round' },
+      paint: { 'line-color': '#5F6368', 'line-opacity': 0.75, 'line-dasharray': [3, 2],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.9, 13, 1.6] } },
+    { id: 'daerah-selected-casing', type: 'line', source: 'daerah', filter: ['==', ['get', 'id'], -1], layout: { 'line-join': 'round' },
+      paint: { 'line-color': '#FFFFFF', 'line-width': 5.5, 'line-opacity': 0.8 } },
+    { id: 'daerah-selected', type: 'line', source: 'daerah', filter: ['==', ['get', 'id'], -1], layout: { 'line-join': 'round' },
+      paint: { 'line-color': '#202124', 'line-width': 2.6 } },
+    { id: 'rail-casing', type: 'line', source: 'rail', layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#FFFFFF', 'line-opacity': 0.9, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 2.4, 13, 3.8, 16, 5.2] } },
+    { id: 'rail-line', type: 'line', source: 'rail', layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': railColor, 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.3, 13, 2.2, 16, 3.2] } },
+    { id: 'drawn-fill', type: 'fill', source: 'drawn', paint: { 'fill-color': DRAW_COLOR, 'fill-opacity': 0.07 } },
+    { id: 'drawn-casing', type: 'line', source: 'drawn', layout: { 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 5, 'line-opacity': 0.85 } },
+    { id: 'drawn-line', type: 'line', source: 'drawn', layout: { 'line-join': 'round' }, paint: { 'line-color': DRAW_COLOR, 'line-width': 2.5 } },
+    { id: 'draft-fill', type: 'fill', source: 'draft', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': DRAW_COLOR, 'fill-opacity': 0.1 } },
+    { id: 'draft-line', type: 'line', source: 'draft', filter: ['!=', ['geometry-type'], 'Point'],
+      paint: { 'line-color': DRAW_COLOR, 'line-width': ['case', ['==', ['get', 'guide'], 1], 1.5, 2.5], 'line-dasharray': [2, 1.5] } },
+    { id: 'draft-vertex', type: 'circle', source: 'draft', filter: ['==', ['geometry-type'], 'Point'],
+      paint: { 'circle-radius': ['case', ['==', ['get', 'first'], 1], 6, 4], 'circle-color': '#FFFFFF', 'circle-stroke-color': DRAW_COLOR, 'circle-stroke-width': 2 } },
+  ];
+  vec.forEach(l => add(m, l, SLOT_VECTOR));
+
+  const markers: LayerSpecification[] = [
+    { id: 'daerah-label', type: 'symbol', source: 'daerah-labels', maxzoom: 10.5,
+      layout: { 'text-field': ['get', 'name'], 'text-font': ['NotoSans-Medium'], 'text-size': 11.5, 'text-transform': 'uppercase',
+        'text-letter-spacing': 0.14, 'text-max-width': 8 },
+      paint: { 'text-color': '#5F6368', 'text-halo-color': 'rgba(255,255,255,.9)', 'text-halo-width': 1.6 } },
+    { id: 'sites-circle', type: 'circle', source: 'sites', layout: { visibility: 'none' },
+      paint: { 'circle-radius': 6.5, 'circle-color': ['case', ['==', ['get', 'flood'], 1], '#FFFFFF', '#202124'],
+        'circle-stroke-color': ['case', ['==', ['get', 'flood'], 1], '#202124', '#FFFFFF'], 'circle-stroke-width': 2.5 } },
+    { id: 'sites-label', type: 'symbol', source: 'sites', minzoom: 10, layout: { visibility: 'none',
+      'text-field': ['get', 'name'], 'text-font': ['NotoSans-Medium'], 'text-size': 11.5, 'text-anchor': 'left', 'text-offset': [0.9, 0], 'text-optional': true },
+      paint: { 'text-color': '#202124', 'text-halo-color': '#FFFFFF', 'text-halo-width': 1.6 } },
+    { id: 'fac-icons', type: 'symbol', source: 'facilities', filter: ['in', ['get', 'k'], ['literal', []]],
+      layout: { 'icon-image': ['concat', 'fac-', ['get', 'k'], '-', ['to-string', ['get', 'c']]], 'icon-allow-overlap': true,
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.62, 12, 0.85, 15, 1.05], 'symbol-sort-key': ['get', 'c'] } },
+    { id: 'fac-stations', type: 'symbol', source: 'facilities', minzoom: 12, filter: ['==', ['get', 'k'], 'station'],
+      layout: { visibility: 'none', 'icon-image': ['concat', 'fac-station-', ['to-string', ['get', 'c']]], 'icon-allow-overlap': true,
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.75, 15, 1], 'symbol-sort-key': ['get', 'c'] } },
+    { id: 'fac-labels', type: 'symbol', source: 'facilities', minzoom: 14, filter: ['in', ['get', 'k'], ['literal', []]],
+      layout: { 'text-field': ['get', 'label'], 'text-font': ['NotoSans-Medium'], 'text-size': 11, 'text-anchor': 'left',
+        'text-offset': [1, 0], 'text-max-width': 9, 'text-optional': true, 'symbol-sort-key': ['-', 3, ['get', 'c']] },
+      paint: { 'text-color': ['match', ['get', 'c'], 3, '#B91C1C', 2, '#92400E', '#3C4043'], 'text-halo-color': '#FFFFFF', 'text-halo-width': 1.6 } },
+  ];
+  markers.forEach(l => add(m, l, SLOT_MARKERS));
+}
+
+function add(m: MLMap, layer: LayerSpecification, slot: string) {
+  m.addLayer({ ...layer, metadata: { slot } } as LayerSpecification, slot);
+}
+
+/** Keep app layers and sources across a basemap style swap (streets ↔ light). */
+function carryOver(prev: StyleSpecification | undefined, next: StyleSpecification): StyleSpecification {
+  if (!prev) return next;
+  const app = prev.layers.filter(l => (l.metadata as { slot?: string } | undefined)?.slot);
+  const layers: LayerSpecification[] = [];
+  for (const l of next.layers) {
+    layers.push(...app.filter(a => (a.metadata as { slot: string }).slot === l.id));
+    layers.push(l);
+  }
+  const sources = { ...next.sources };
+  for (const [k, v] of Object.entries(prev.sources)) if (k !== 'base' && k !== 'google') sources[k] = v;
+  return { ...next, sources, layers };
+}
+
+const setVis = (m: MLMap, id: string, on: boolean) => {
+  if (m.getLayer(id)) m.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
+};
 
 export const MapView: FC<Props> = (props) => {
   const { bundle, grid, scenario, layers, basemap, selectedDaerah, drawn, drawMode, focus, inspect, resetToken } = props;
   const box = useRef<HTMLDivElement>(null);
-  const map = useRef<L.Map | null>(null);
-  // Leaflet handlers are bound once; they read the latest props through this ref.
+  const tip = useRef<HTMLDivElement>(null);
+  const map = useRef<MLMap | null>(null);
+  // map handlers are bound once; they read the latest props through this ref
   const cb = useRef(props);
   useLayoutEffect(() => { cb.current = props; });
-  const refs = useRef<{
-    tiles?: L.TileLayer; googleAttr?: string; googleSessionId?: string;
-    susc?: L.ImageOverlay; suscUrl?: string;
-    hist?: L.ImageOverlay; histPainted?: boolean;
-    built?: L.ImageOverlay; builtPainted?: boolean;
-    safe?: L.ImageOverlay; safeUrl?: string;
-    rivers?: L.GeoJSON; bounds?: L.GeoJSON; sites?: L.LayerGroup;
-    rail?: L.LayerGroup; railLines?: { line: L.Polyline; key: string }[];
-    facilities?: Record<string, L.LayerGroup>; facilityMarkers?: { m: L.CircleMarker; f: Facility }[];
-    drawn?: L.Polygon; focusMarker?: L.CircleMarker;
-    selangor?: L.LatLngBounds;
+  const r = useRef<{
+    ready?: boolean;
+    variant?: BaseVariant;
+    urls: Partial<Record<RasterId, string>>;
+    painted: Partial<Record<RasterId, string>>;
+    popup?: Popup;
+    pin?: Marker;
+    hover?: number | null;
+    googleAttr?: HTMLElement;
+    selangor?: LngLatBounds;
     /** a rectangle drag ends with a click event; ignore clicks until this time */
     quietUntil?: number;
-  }>({});
+    onReady: (() => void)[];
+  }>({ urls: {}, painted: {}, onReady: [] });
 
-  const openCellPopup = (latlng: L.LatLng, title?: string) => {
+  /** Run now if the style and app layers are ready, else once they are. */
+  const whenReady = (fn: () => void) => {
+    if (r.current.ready && map.current) fn();
+    else r.current.onReady.push(fn);
+  };
+
+  const openCellPopup = (lng: number, lat: number, title?: string) => {
     const m = map.current;
     const p = cb.current;
     if (!m) return;
-    const info = queryCell(p.grid, p.bundle.model, latlng.lng, latlng.lat);
+    const info = queryCell(p.grid, p.bundle.model, lng, lat);
     if (!info) return;
-    L.popup({ maxWidth: 270 })
-      .setLatLng(latlng)
-      .setContent(cellPopup(info, p.scenario, () => { cb.current.onCellPick(info); m.closePopup(); }, title))
-      .openOn(m);
+    r.current.popup?.remove();
+    r.current.popup = new Popup({ maxWidth: '290px', offset: 10, className: 'cc-popup', focusAfterOpen: false })
+      .setLngLat([lng, lat])
+      .setDOMContent(cellPopup(info, p.scenario, () => { cb.current.onCellPick(info); r.current.popup?.remove(); }, title))
+      .addTo(m);
   };
   const openRef = useRef(openCellPopup);
   useLayoutEffect(() => { openRef.current = openCellPopup; });
@@ -170,159 +368,175 @@ export const MapView: FC<Props> = (props) => {
   // ── init once ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!box.current || map.current) return;
-    const m = L.map(box.current, { zoomControl: false, minZoom: 8, maxZoom: 19, zoomSnap: 0.25, attributionControl: true });
+    ensureProtocol();
+    const sel = new LngLatBounds();
+    for (const f of bundle.daerah.features) {
+      if (f.properties?.excluded) continue;
+      const g = f.geometry;
+      const polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
+      polys.forEach(p => sel.extend(ringBounds(p[0] as [number, number][])));
+    }
+    r.current.selangor = sel;
+    r.current.variant = cb.current.basemap === 'light' ? 'light' : 'streets';
+    const m = new MLMap({
+      container: box.current,
+      style: basemapStyle(r.current.variant, bundledUrls()),
+      bounds: sel, fitBoundsOptions: { padding: cb.current.padding },
+      minZoom: 7, maxZoom: 18.5,
+      // the bundled tiles cover the study window; keep the view inside it
+      maxBounds: [[100.66, 2.46], [102.09, 3.99]],
+      renderWorldCopies: false, dragRotate: false, pitchWithRotate: false, touchPitch: false,
+      attributionControl: false, fadeDuration: 150,
+    });
     map.current = m;
-    L.control.zoom({ position: 'bottomright' }).addTo(m);
-    L.control.scale({ position: 'bottomright', imperial: false }).addTo(m);
-    m.attributionControl.addAttribution(DATA_ATTRIBUTION);
-    for (const [name, z] of [['raster', 350], ['history', 360], ['safe', 365], ['rivers', 420], ['rail', 425], ['bounds', 430], ['drawn', 450], ['facilities', 455], ['sites', 460]] as const) {
-      m.createPane(name).style.zIndex = String(z);
-    }
-    for (const p of ['raster', 'history', 'safe']) m.getPane(p)!.style.pointerEvents = 'none';
-
-    const r = refs.current;
-    const gb = gridBounds(bundle.grid);
-    r.susc = L.imageOverlay('', gb, { pane: 'raster', className: 'pixelated', interactive: false });
-    r.hist = L.imageOverlay('', gb, { pane: 'history', className: 'pixelated', interactive: false });
-    r.built = L.imageOverlay('', gb, { pane: 'raster', className: 'pixelated', interactive: false });
-    r.safe = L.imageOverlay('', gb, { pane: 'safe', className: 'pixelated', interactive: false });
-
-    // rivers on a canvas renderer (thousands of lines)
-    const riverRenderer = L.canvas({ pane: 'rivers', padding: 0.3 });
-    r.rivers = L.geoJSON(bundle.rivers, {
-      pane: 'rivers',
-      style: (f?: Feature) => {
-        const c = f?.properties?.c;
-        return { renderer: riverRenderer, color: RIVER_COLOR, weight: c === 'river' ? 1.6 : c === 'canal' ? 1.1 : 0.8, opacity: c === 'stream' ? 0.55 : 0.8 } as L.PathOptions;
-      },
-      interactive: false,
+    if (import.meta.env.DEV) (window as unknown as { __ginkgoMap?: MLMap }).__ginkgoMap = m;
+    m.touchZoomRotate.disableRotation();
+    m.keyboard.disableRotation();
+    m.addControl(new AttributionControl({ compact: true, customAttribution: DATA_ATTRIBUTION }), 'bottom-right');
+    m.addControl(new NavigationControl({ showCompass: false }), 'bottom-right');
+    m.addControl(new ScaleControl({ maxWidth: 90, unit: 'metric' }), 'bottom-right');
+    m.setMissingStyleImageResolver(id => {
+      const icon = makeIcon(id);
+      if (icon && !m.hasImage(id)) m.addImage(id, icon.image, icon.options);
     });
 
-    // rail: white casing under each line, so lines read on any basemap
-    const railRenderer = L.canvas({ pane: 'rail', padding: 0.3 });
-    r.rail = L.layerGroup([], { pane: 'rail' });
-    r.railLines = [];
-    for (const f of bundle.rail.features) {
-      const key = String(f.properties?.k ?? 'other');
-      const name = bundle.rail.lines[key]?.name ?? 'Rail';
-      const gj = L.geoJSON(f, { style: () => ({ renderer: railRenderer, color: '#FFFFFF', weight: 6, opacity: 0.9 } as L.PathOptions), interactive: false });
-      const line = L.geoJSON(f, { style: () => ({ renderer: railRenderer, color: RAIL_NEUTRAL, weight: 3.2, opacity: 1 } as L.PathOptions) });
-      line.bindTooltip(name, { sticky: true, className: 'cc-tip' });
-      r.rail.addLayer(gj).addLayer(line);
-      line.eachLayer(l => r.railLines!.push({ line: l as L.Polyline, key }));
-    }
+    m.once('load', () => {
+      // compact attribution starts expanded; start collapsed like a consumer map
+      m.getContainer().querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show');
+      addAppLayers(m, bundle);
+      r.current.ready = true;
+      const queued = r.current.onReady.splice(0);
+      queued.forEach(fn => fn());
+    });
 
-    // facilities, one group per toggle, on a shared canvas renderer
-    const facRenderer = L.canvas({ pane: 'facilities', padding: 0.3, tolerance: 4 });
-    r.facilities = {};
-    r.facilityMarkers = [];
-    for (const [group, kinds] of Object.entries(LAYER_KINDS)) {
-      const lg = L.layerGroup([], { pane: 'facilities' });
-      for (const f of bundle.facilities.items.filter(x => kinds.includes(x.k))) {
-        const mk = L.circleMarker([f.c[1], f.c[0]], { ...facilityStyle(f, cb.current.scenario), pane: 'facilities', renderer: facRenderer });
-        mk.bindTooltip(() => {
-          const sc = cb.current.scenario;
-          return `<strong>${KIND_LABEL[f.k]}</strong><br>${f.n.replace(/[<>&]/g, '')}<br>${CLASS_NAME[classOf(f.s, sc)]} (${sc.label})`;
-        }, { className: 'cc-tip', direction: 'top', offset: [0, -4] });
-        mk.on('click', (e: L.LeafletMouseEvent) => {
-          L.DomEvent.stopPropagation(e);
-          if (cb.current.drawMode !== 'none') return;
-          openRef.current(L.latLng(f.c[1], f.c[0]), f.n);
-        });
-        lg.addLayer(mk);
-        r.facilityMarkers.push({ m: mk, f });
-      }
-      r.facilities[group] = lg;
-    }
+    // hover: one tooltip for facilities, sites, rail and daerah
+    const hoverDaerah = (id: number | null) => {
+      const prev = r.current.hover;
+      if (prev === id) return;
+      if (prev != null) m.setFeatureState({ source: 'daerah', id: prev }, { hover: false });
+      if (id != null) m.setFeatureState({ source: 'daerah', id }, { hover: true });
+      r.current.hover = id;
+    };
+    m.on('mousemove', (e: MapMouseEvent) => {
+      const t = tip.current;
+      if (!t || !r.current.ready) return;
+      if (cb.current.drawMode !== 'none') { t.hidden = true; return; }
+      const layersOn = INTERACTIVE.filter(id => m.getLayer(id) && m.getLayoutProperty(id, 'visibility') !== 'none');
+      const hit = m.queryRenderedFeatures(e.point, { layers: layersOn });
+      const f = hit[0];
+      const content = f ? tooltipFor(f) : null;
+      const daerahHit = hit.find(h => h.layer.id === 'daerah-fill');
+      hoverDaerah(daerahHit && !daerahHit.properties.excluded ? Number(daerahHit.id) : null);
+      m.getCanvas().style.cursor = f && f.layer.id !== 'daerah-fill' ? 'pointer' : '';
+      if (!content) { t.hidden = true; return; }
+      t.replaceChildren(content);
+      t.hidden = false;
+      const { width, height } = m.getContainer().getBoundingClientRect();
+      const x = Math.min(e.point.x + 14, width - t.offsetWidth - 8);
+      const y = e.point.y + 16 + t.offsetHeight > height ? e.point.y - t.offsetHeight - 10 : e.point.y + 16;
+      t.style.transform = `translate(${x}px, ${y}px)`;
+    });
+    m.getCanvas().addEventListener('mouseleave', () => {
+      if (tip.current) tip.current.hidden = true;
+      hoverDaerah(null);
+    });
 
-    // daerah boundaries — interactive; federal territories drawn as excluded
-    r.bounds = L.geoJSON(bundle.daerah, {
-      pane: 'bounds',
-      style: () => ({}),
-      onEachFeature: (f, layer) => {
-        const p = f.properties as { id: number; name: string; excluded?: boolean };
-        if (p.excluded) {
-          layer.bindTooltip(`${p.name} — federal territory, outside Selangor scope`, { sticky: true, className: 'cc-tip' });
-          return;
+    const tooltipFor = (f: MapGeoJSONFeature): HTMLElement | null => {
+      const p = f.properties;
+      const sc = cb.current.scenario;
+      switch (f.layer.id) {
+        case 'fac-icons':
+        case 'fac-stations':
+          return lines([KIND_LABEL[p.k as FacilityKind], 'strong'], String(p.n),
+            Number(p.c) ? `${CLASS_NAME[Number(p.c)]} · ${sc.label} rain` : 'Federal territory — outside Selangor scope');
+        case 'sites-circle': {
+          const s = bundle.validation.sites[Number(p.i)];
+          const v = s.scenarios[sc.key];
+          const rows: (string | [string, 'strong' | 'em'])[] = [[s.name, 'strong'],
+            s.kind === 'reported_flood' ? 'Reported flood, Dec 2021' : 'Hilly control (DEM-selected)',
+            `Model (${sc.label}): ${v.point} · expected ${s.expect}`];
+          if (s.outside_scope) rows.push(['Outside Selangor — regression check only', 'em']);
+          return lines(...rows);
         }
-        const st = bundle.stats.daerah.find(d => d.id === p.id)!;
-        layer.bindTooltip(() => {
-          const sc = cb.current.scenario;
+        case 'rail-line':
+          return lines([bundle.rail.lines[String(p.k)]?.name ?? 'Rail', 'strong']);
+        case 'daerah-fill': {
+          if (p.excluded) return lines([String(p.name), 'strong'], 'Federal territory — outside Selangor scope');
+          const st = bundle.stats.daerah.find(d => d.id === Number(p.id));
+          if (!st) return null;
           const s = st.scenarios[sc.key];
-          return `<strong>${p.name}</strong><br>${s.high_pct.toFixed(1)}% High · ${s.moderate_pct.toFixed(1)}% Moderate (${sc.label})`;
-        }, { sticky: true, className: 'cc-tip' });
-        layer.on('click', (e: L.LeafletMouseEvent) => {
-          if (cb.current.drawMode !== 'none' || Date.now() < (refs.current.quietUntil ?? 0)) return;
-          if (cb.current.selectedDaerah !== p.id) {
-            L.DomEvent.stopPropagation(e);
-            cb.current.onSelectDaerah(p.id);
-          }
-        });
-      },
+          return lines([String(p.name), 'strong'], `${s.high_pct.toFixed(1)}% High · ${s.moderate_pct.toFixed(1)}% Moderate (${sc.label})`);
+        }
+      }
+      return null;
+    };
+
+    // click: facility/site → cell popup; daerah → select; otherwise inspect the cell
+    m.on('click', (e: MapMouseEvent) => {
+      if (!r.current.ready || cb.current.drawMode !== 'none' || Date.now() < (r.current.quietUntil ?? 0)) return;
+      const layersOn = INTERACTIVE.filter(id => m.getLayer(id) && m.getLayoutProperty(id, 'visibility') !== 'none');
+      const hit = m.queryRenderedFeatures(e.point, { layers: layersOn });
+      const pt = hit.find(h => h.layer.id !== 'daerah-fill' && h.layer.id !== 'rail-line');
+      if (pt) {
+        const [lng, lat] = (pt.geometry as Point).coordinates;
+        const title = pt.layer.id === 'sites-circle' ? bundle.validation.sites[Number(pt.properties.i)].name : String(pt.properties.n);
+        openRef.current(lng, lat, title);
+        return;
+      }
+      const d = hit.find(h => h.layer.id === 'daerah-fill');
+      if (d && !d.properties.excluded && cb.current.selectedDaerah !== Number(d.properties.id)) {
+        cb.current.onSelectDaerah(Number(d.properties.id));
+        return;
+      }
+      openRef.current(e.lngLat.lng, e.lngLat.lat);
     });
 
-    // validation sites (Flow D self-audit)
-    r.sites = L.layerGroup([], { pane: 'sites' });
-    for (const s of bundle.validation.sites) {
-      const isFlood = s.kind === 'reported_flood';
-      const mk = L.circleMarker([s.lonlat[1], s.lonlat[0]], {
-        pane: 'sites', radius: 6, weight: 2.5, color: '#111111',
-        fillColor: isFlood ? '#FFFFFF' : '#111111', fillOpacity: 1,
-      });
-      mk.bindTooltip(() => {
-        const sc = cb.current.scenario;
-        const v = s.scenarios[sc.key];
-        const tag = isFlood ? 'Reported flood, Dec 2021' : 'Hilly control (DEM-selected)';
-        return `<strong>${s.name}</strong><br>${tag}<br>Model (${sc.label}): ${v.point} · expected ${s.expect}${s.outside_scope ? '<br><em>Outside Selangor — regression check only</em>' : ''}`;
-      }, { className: 'cc-tip', direction: 'top', offset: [0, -6] });
-      mk.on('click', (e: L.LeafletMouseEvent) => L.DomEvent.stopPropagation(e));
-      r.sites.addLayer(mk);
-    }
-
-    // Selangor extent = union of the nine daerah
-    const sel = L.latLngBounds([]);
-    r.bounds.eachLayer(l => {
-      const f = (l as L.Polygon).feature as Feature;
-      if (!f.properties?.excluded) sel.extend((l as L.Polygon).getBounds());
-    });
-    r.selangor = sel;
-    m.fitBounds(sel, { padding: [16, 16] });
-
-    // map click → inspect a cell
-    m.on('click', (e: L.LeafletMouseEvent) => {
-      if (cb.current.drawMode !== 'none' || Date.now() < (refs.current.quietUntil ?? 0)) return;
-      openRef.current(e.latlng);
-    });
-
-    const ro = new ResizeObserver(() => m.invalidateSize());
+    const ro = new ResizeObserver(() => m.resize());
     ro.observe(box.current);
-    return () => { ro.disconnect(); m.remove(); map.current = null; };
+    const state = r.current;
+    return () => { ro.disconnect(); m.remove(); map.current = null; state.ready = false; };
   }, [bundle]);
 
-  // ── basemap (incl. optional Google Map Tiles API) ─────────────────────
+  // ── basemap: bundled vector style (streets / light), Google raster, or plain ──
   useEffect(() => {
-    const m = map.current, r = refs.current;
+    const m = map.current;
     if (!m) return;
     let cancelled = false;
-    const clearGoogleAttr = () => {
-      if (r.googleAttr) m.attributionControl.removeAttribution(r.googleAttr);
-      r.googleAttr = undefined;
-    };
-    r.tiles?.remove();
-    r.tiles = undefined;
-    clearGoogleAttr();
-    if (basemap === 'none') return;
-    if (basemap === 'google' || basemap === 'google-sat') {
+    let onMove: (() => void) | null = null;
+    whenReady(() => {
+      if (cancelled) return;
+      const variant: BaseVariant = basemap === 'light' ? 'light' : 'streets';
+      if (variant !== r.current.variant) {
+        r.current.variant = variant;
+        m.setStyle(basemapStyle(variant, bundledUrls()), { transformStyle: carryOver });
+      }
+      const showBase = (on: boolean) => {
+        for (const l of m.getStyle().layers) {
+          if ((l.metadata as { group?: string } | undefined)?.group === BASE_GROUP && l.id !== 'background') setVis(m, l.id, on);
+        }
+      };
+      const dropGoogle = () => {
+        if (m.getLayer('google-layer')) m.removeLayer('google-layer');
+        if (m.getSource('google')) m.removeSource('google');
+        r.current.googleAttr?.remove();
+        r.current.googleAttr = undefined;
+      };
+      dropGoogle();
+      if (basemap !== 'google' && basemap !== 'google-sat') {
+        showBase(basemap !== 'none');
+        return;
+      }
       const type: GoogleMapType = basemap === 'google' ? 'roadmap' : 'satellite';
-      let onMove: (() => void) | null = null;
       googleSession(type).then(session => {
         if (cancelled) return;
-        r.googleSessionId = session;
-        r.tiles = L.tileLayer(googleTileUrl(session), { maxZoom: 21, attribution: '' }).addTo(m);
+        m.addSource('google', { type: 'raster', tiles: [googleTileUrl(session)], tileSize: 256, maxzoom: 21 });
+        m.addLayer({ id: 'google-layer', type: 'raster', source: 'google' }, 'landcover');
+        showBase(false);
+        const attr = el('div', 'google-attr-box');
+        r.current.googleAttr = attr;
+        m.getContainer().append(attr);
         const setAttr = (text: string) => {
-          clearGoogleAttr();
-          r.googleAttr = `<span class="google-attr">Google</span> ${text.replace(/[<>&]/g, '')}`;
-          m.attributionControl.addAttribution(r.googleAttr);
+          attr.replaceChildren(el('span', 'google-attr', 'Google'), document.createTextNode(` ${text}`));
         };
         setAttr(`Map data ©${new Date().getFullYear()} Google`);
         let t: ReturnType<typeof setTimeout> | undefined;
@@ -337,238 +551,209 @@ export const MapView: FC<Props> = (props) => {
         m.on('moveend', onMove);
         onMove();
       }).catch(err => {
-        if (!cancelled) cb.current.onBasemapError(`Google basemap unavailable (${err.message}). Showing Streets instead.`);
+        if (!cancelled) cb.current.onBasemapError(`Google basemap unavailable (${err.message}). Showing the Ginkgo map instead.`);
       });
-      return () => { cancelled = true; if (onMove) m.off('moveend', onMove); };
-    }
-    const [url, opt] = TILES[basemap];
-    r.tiles = L.tileLayer(url, opt).addTo(m);
-    return () => { cancelled = true; };
+    });
+    return () => { cancelled = true; if (onMove) m.off('moveend', onMove); };
   }, [basemap]);
 
-  // ── susceptibility overlay (re-painted on scenario change) ─────────────
-  useEffect(() => {
-    const m = map.current, r = refs.current;
-    if (!m || !r.susc) return;
-    if (!layers.susceptibility) { r.susc.remove(); return; }
-    let cancelled = false;
-    canvasToUrl(classCanvas(bundle.grid, scenario, layers.showLow)).then(url => {
-      if (cancelled) { URL.revokeObjectURL(url); return; }
-      const old = r.suscUrl;
-      r.susc!.setUrl(url);
-      r.suscUrl = url;
-      if (!m.hasLayer(r.susc!)) r.susc!.addTo(m);
-      if (old) setTimeout(() => URL.revokeObjectURL(old), 1000);
+  // ── raster overlays: risk re-painted per scenario; the others on first use ──
+  const showRaster = (id: RasterId, on: boolean, paintKey: string | null, paint: () => HTMLCanvasElement) => {
+    whenReady(() => {
+      const m = map.current!;
+      setVis(m, `${id}-layer`, on);
+      if (!on || paintKey === null || r.current.painted[id] === paintKey) return;
+      r.current.painted[id] = paintKey;
+      canvasToUrl(paint()).then(url => {
+        if (r.current.painted[id] !== paintKey || !map.current) { URL.revokeObjectURL(url); return; }
+        const old = r.current.urls[id];
+        (map.current.getSource(id) as ImageSource | undefined)?.updateImage({ url });
+        r.current.urls[id] = url;
+        if (old) setTimeout(() => URL.revokeObjectURL(old), 2000);
+      });
     });
-    m.closePopup();
-    return () => { cancelled = true; };
+  };
+  useEffect(() => {
+    showRaster('risk', layers.susceptibility, `${scenario.key}:${layers.showLow}`, () => classCanvas(bundle.grid, scenario, layers.showLow));
+    r.current.popup?.remove();
   }, [bundle, scenario, layers.susceptibility, layers.showLow]);
-
-  // ── history / built-up / safe-land overlays (painted on first use) ─────
+  useEffect(() => { showRaster('history', layers.history, 'h', () => historyCanvas(bundle.grid)); }, [bundle, layers.history]);
+  useEffect(() => { showRaster('built', layers.built, 'b', () => builtCanvas(bundle.grid)); }, [bundle, layers.built]);
   useEffect(() => {
-    const m = map.current, r = refs.current;
-    if (!m || !r.hist) return;
-    if (!layers.history) { r.hist.remove(); return; }
-    if (!r.histPainted) {
-      r.histPainted = true;
-      canvasToUrl(historyCanvas(bundle.grid)).then(url => { r.hist!.setUrl(url); });
-    }
-    r.hist.addTo(m);
-  }, [bundle, layers.history]);
-
-  useEffect(() => {
-    const m = map.current, r = refs.current;
-    if (!m || !r.built) return;
-    if (!layers.built) { r.built.remove(); return; }
-    if (!r.builtPainted) {
-      r.builtPainted = true;
-      canvasToUrl(builtCanvas(bundle.grid)).then(url => { r.built!.setUrl(url); });
-    }
-    r.built.addTo(m);
-  }, [bundle, layers.built]);
-
-  useEffect(() => {
-    const m = map.current, r = refs.current;
-    if (!m || !r.safe) return;
-    if (!layers.safe || !grid.detail) { r.safe.remove(); return; }
-    if (!r.safeUrl) {
-      canvasToUrl(safeCanvas(grid, bundle.model)).then(url => { r.safeUrl = url; r.safe!.setUrl(url); });
-    }
-    r.safe.addTo(m);
+    showRaster('safe', layers.safe && Boolean(grid.detail), grid.detail ? 's' : null, () => safeCanvas(grid, bundle.model));
   }, [bundle, grid, layers.safe]);
 
   // ── vector layers on/off ───────────────────────────────────────────────
   useEffect(() => {
-    const m = map.current, r = refs.current;
-    if (!m) return;
-    const sync = (layer: L.Layer | undefined, on: boolean) => {
-      if (!layer) return;
-      if (on && !m.hasLayer(layer)) layer.addTo(m);
-      if (!on && m.hasLayer(layer)) layer.remove();
-    };
-    sync(r.rivers, layers.rivers);
-    sync(r.bounds, layers.boundaries);
-    sync(r.sites, layers.sites);
-    sync(r.rail, layers.rail);
-    sync(r.facilities?.rail, layers.rail);
-    sync(r.facilities?.hospital, layers.hospital);
-    sync(r.facilities?.clinic, layers.clinic);
-    sync(r.facilities?.school, layers.school);
-    sync(r.facilities?.emergency, layers.emergency);
-  }, [layers.rivers, layers.boundaries, layers.sites, layers.rail, layers.hospital, layers.clinic, layers.school, layers.emergency]);
-
-  // facility colours follow the scenario; rail takes operator colours only
-  // when the risk layer is off (their reds/oranges/blues would read as risk classes)
-  useEffect(() => {
-    const r = refs.current;
-    for (const { m, f } of r.facilityMarkers ?? []) m.setStyle(facilityStyle(f, scenario));
-  }, [scenario]);
-  useEffect(() => {
-    const r = refs.current;
-    for (const { line, key } of r.railLines ?? []) {
-      line.setStyle({ color: layers.susceptibility ? RAIL_NEUTRAL : bundle.rail.lines[key]?.color ?? RAIL_NEUTRAL });
-    }
-  }, [bundle, layers.susceptibility]);
-
-  // ── daerah styling + zoom on selection ─────────────────────────────────
-  useEffect(() => {
-    const m = map.current, r = refs.current;
-    if (!m || !r.bounds) return;
-    r.bounds.setStyle((f?: Feature) => {
-      const p = f?.properties as { id: number; excluded?: boolean };
-      if (p.excluded) return { color: '#6B7280', weight: 1, dashArray: '4 3', fillColor: '#9CA3AF', fillOpacity: 0.32 };
-      const on = p.id === selectedDaerah;
-      return {
-        color: '#111111', weight: on ? 3 : 1.1, opacity: on ? 1 : 0.75,
-        fillColor: '#111111', fillOpacity: selectedDaerah && !on ? 0.06 : 0.0001,
-      };
+    whenReady(() => {
+      const m = map.current!;
+      setVis(m, 'rivers-line', layers.rivers);
+      for (const id of ['daerah-fill', 'daerah-line', 'daerah-label', 'daerah-selected-casing', 'daerah-selected']) setVis(m, id, layers.boundaries);
+      for (const id of ['sites-circle', 'sites-label']) setVis(m, id, layers.sites);
+      for (const id of ['rail-casing', 'rail-line', 'fac-stations']) setVis(m, id, layers.rail);
+      const kinds = (Object.keys(LAYER_KINDS) as (keyof typeof LAYER_KINDS)[]).filter(k => layers[k]).flatMap(k => LAYER_KINDS[k]);
+      const filter = ['in', ['get', 'k'], ['literal', kinds]] as unknown as FilterSpecification;
+      m.setFilter('fac-icons', filter);
+      m.setFilter('fac-labels', ['in', ['get', 'k'], ['literal', layers.rail ? [...kinds, 'station'] : kinds]] as unknown as FilterSpecification);
     });
-    if (selectedDaerah) {
-      r.bounds.eachLayer(l => {
-        const pl = l as L.Polygon;
-        if ((pl.feature as Feature).properties?.id === selectedDaerah && !(pl.feature as Feature).properties?.excluded) {
-          pl.bringToFront();
-          m.flyToBounds(pl.getBounds(), { padding: [24, 24], duration: 0.6 });
-        }
-      });
-    }
-  }, [selectedDaerah]);
+  }, [layers]);
+
+  // facility pins follow the scenario's class thresholds
+  useEffect(() => {
+    whenReady(() => (map.current!.getSource('facilities') as GeoJSONSource).setData(facilityData(bundle, scenario)));
+  }, [bundle, scenario]);
+
+  // ── daerah selection: outline it, dim the rest, fly there ─────────────
+  useEffect(() => {
+    whenReady(() => {
+      const m = map.current!;
+      for (const s of bundle.stats.daerah) {
+        m.setFeatureState({ source: 'daerah', id: s.id }, { dim: selectedDaerah !== null && s.id !== selectedDaerah });
+      }
+      const only: FilterSpecification = ['all', ['==', ['get', 'id'], selectedDaerah ?? -1], ['!', ['has', 'excluded']]];
+      m.setFilter('daerah-selected', only);
+      m.setFilter('daerah-selected-casing', only);
+      if (!selectedDaerah) return;
+      const f = bundle.daerah.features.find(x => x.properties?.id === selectedDaerah && !x.properties?.excluded);
+      if (!f) return;
+      const g = f.geometry;
+      const polys = g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : [];
+      const b = new LngLatBounds();
+      polys.forEach(p => b.extend(ringBounds(p[0] as [number, number][])));
+      m.fitBounds(b, { padding: pad(cb.current.padding, 24), duration: 700 });
+    });
+  }, [bundle, selectedDaerah]);
 
   // ── reset view ─────────────────────────────────────────────────────────
   useEffect(() => {
-    const m = map.current, r = refs.current;
-    if (!m || !r.selangor || resetToken === 0) return;
-    m.closePopup();
-    m.flyToBounds(r.selangor, { padding: [16, 16], duration: 0.5 });
+    const m = map.current;
+    if (!m || !r.current.selangor || resetToken === 0) return;
+    r.current.popup?.remove();
+    m.fitBounds(r.current.selangor, { padding: cb.current.padding, duration: 600 });
   }, [resetToken]);
 
-  // ── search / agent focus ───────────────────────────────────────────────
+  // ── search / agent focus: Google-style red pin ─────────────────────────
   useEffect(() => {
-    const m = map.current, r = refs.current;
+    const m = map.current;
     if (!m || !focus) return;
-    r.focusMarker?.remove();
-    r.focusMarker = L.circleMarker(focus.point, { pane: 'sites', radius: 7, color: '#08A045', weight: 3, fillColor: '#fff', fillOpacity: 1 })
-      .bindTooltip(focus.label, { permanent: true, direction: 'right', className: 'cc-tip', offset: [8, 0] })
-      .addTo(m);
-    const b = L.latLngBounds(focus.bounds);
-    if (b.getNorth() - b.getSouth() < 0.004) m.flyTo(focus.point, 15, { duration: 0.6 });
-    else m.flyToBounds(b, { padding: [40, 40], maxZoom: 15, duration: 0.6 });
+    r.current.pin?.remove();
+    const [lat, lon] = focus.point;
+    r.current.pin = new Marker({ element: pinElement(focus.label, false), anchor: 'bottom' }).setLngLat([lon, lat]).addTo(m);
+    const [[s, w], [n, e]] = focus.bounds;
+    if (n - s < 0.004 && e - w < 0.004) m.flyTo({ center: [lon, lat], zoom: 15, offset: centerOffset(cb.current.padding), duration: 700 });
+    else m.fitBounds([[w, s], [e, n]], { padding: pad(cb.current.padding, 40), maxZoom: 15, duration: 700 });
   }, [focus]);
 
-  // ── open a cell popup on request (locate-me, copilot) ─────────────────
+  // ── open a cell popup on request (locate-me, copilot, facility lists) ──
   useEffect(() => {
     const m = map.current;
     if (!m || !inspect) return;
-    const ll = L.latLng(inspect.lat, inspect.lon);
-    m.flyTo(ll, Math.max(m.getZoom(), 14), { duration: 0.6 });
-    m.once('moveend', () => openRef.current(ll, inspect.title));
+    if (inspect.me) {
+      r.current.pin?.remove();
+      r.current.pin = new Marker({ element: pinElement('You are here', true) }).setLngLat([inspect.lon, inspect.lat]).addTo(m);
+    }
+    m.flyTo({ center: [inspect.lon, inspect.lat], zoom: Math.max(m.getZoom(), 14), offset: centerOffset(cb.current.padding), duration: 700 });
+    m.once('moveend', () => openRef.current(inspect.lon, inspect.lat, inspect.title));
   }, [inspect]);
 
   // ── drawn polygon ──────────────────────────────────────────────────────
   useEffect(() => {
-    const m = map.current, r = refs.current;
-    if (!m) return;
-    r.drawn?.remove();
-    r.drawn = undefined;
-    if (drawn) {
-      r.drawn = L.polygon(drawn.map(ring => ring.map(([x, y]) => [y, x] as [number, number])), {
-        pane: 'drawn', color: '#111111', weight: 2.5, fillColor: '#111111', fillOpacity: 0.05, interactive: false,
-      }).addTo(m);
-    }
+    whenReady(() => {
+      const data: FeatureCollection = drawn
+        ? { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: drawn.map(ring => [...ring, ring[0]]) } }] }
+        : EMPTY;
+      (map.current!.getSource('drawn') as GeoJSONSource).setData(data);
+    });
   }, [drawn]);
 
   // ── drawing tools ──────────────────────────────────────────────────────
   useEffect(() => {
     const m = map.current;
     if (!m || drawMode === 'none') return;
-    const container = m.getContainer();
-    container.style.cursor = 'crosshair';
-    m.closePopup();
-    const style = { pane: 'drawn', color: '#08A045', weight: 2.5, fillColor: '#08A045', fillOpacity: 0.08, interactive: false };
-    const finish = (latlngs: L.LatLng[]) => {
+    const canvas = m.getCanvas();
+    canvas.style.cursor = 'crosshair';
+    r.current.popup?.remove();
+    if (tip.current) tip.current.hidden = true;
+    const draft = (features: Feature[]) => (m.getSource('draft') as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features });
+    const finish = (pts: [number, number][]) => {
       cleanup();
-      if (latlngs.length >= 3) cb.current.onDrawn([latlngs.map(p => [p.lng, p.lat] as [number, number])]);
+      if (pts.length >= 3) cb.current.onDrawn([pts]);
       cb.current.onDrawModeChange('none');
     };
     const cancel = () => { cleanup(); cb.current.onDrawModeChange('none'); };
     let cleanup = () => {};
 
     if (drawMode === 'rect') {
-      m.dragging.disable();
-      let start: L.LatLng | null = null;
-      let rect: L.Rectangle | null = null;
-      const down = (e: L.LeafletMouseEvent) => { start = e.latlng; };
-      const move = (e: L.LeafletMouseEvent) => {
-        if (!start) return;
-        const b = L.latLngBounds(start, e.latlng);
-        if (rect) rect.setBounds(b); else rect = L.rectangle(b, style).addTo(m);
+      m.dragPan.disable();
+      m.boxZoom.disable();
+      let start: LngLat | null = null;
+      let last: LngLat | null = null;
+      const corners = (a: LngLat, b: LngLat): [number, number][] => [[a.lng, a.lat], [b.lng, a.lat], [b.lng, b.lat], [a.lng, b.lat]];
+      const down = (e: MapMouseEvent | MapTouchEvent) => {
+        if ('button' in e.originalEvent && e.originalEvent.button !== 0) return;
+        start = last = e.lngLat;
+        e.preventDefault();
       };
-      const up = (e: L.LeafletMouseEvent) => {
+      const move = (e: MapMouseEvent | MapTouchEvent) => {
         if (!start) return;
-        const b = L.latLngBounds(start, e.latlng);
+        last = e.lngLat;
+        const ring = corners(start, last);
+        draft([{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[...ring, ring[0]]] } }]);
+      };
+      const up = () => {
+        if (!start || !last) return;
+        const [a, b] = [start, last];
         start = null;
-        refs.current.quietUntil = Date.now() + 400;
-        const px = m.latLngToContainerPoint(b.getNorthEast()).distanceTo(m.latLngToContainerPoint(b.getSouthWest()));
-        if (px < 8) { rect?.remove(); rect = null; return; }
-        finish([b.getNorthWest(), b.getNorthEast(), b.getSouthEast(), b.getSouthWest()]);
+        r.current.quietUntil = Date.now() + 400;
+        const pa = m.project(a), pb = m.project(b);
+        if (Math.hypot(pa.x - pb.x, pa.y - pb.y) < 8) { draft([]); return; }
+        finish(corners(a, b));
       };
       m.on('mousedown', down); m.on('mousemove', move); m.on('mouseup', up);
+      m.on('touchstart', down); m.on('touchmove', move); m.on('touchend', up);
       cleanup = () => {
         m.off('mousedown', down); m.off('mousemove', move); m.off('mouseup', up);
-        rect?.remove(); m.dragging.enable(); container.style.cursor = '';
+        m.off('touchstart', down); m.off('touchmove', move); m.off('touchend', up);
+        draft([]); m.dragPan.enable(); m.boxZoom.enable(); canvas.style.cursor = '';
       };
     } else {
       m.doubleClickZoom.disable();
-      const pts: L.LatLng[] = [];
-      const line = L.polyline([], { ...style, dashArray: undefined }).addTo(m);
-      const guide = L.polyline([], { ...style, weight: 1.5, opacity: 0.7 }).addTo(m);
-      const vertices = L.layerGroup().addTo(m);
-      const near = (a: L.LatLng, b: L.LatLng) => m.latLngToContainerPoint(a).distanceTo(m.latLngToContainerPoint(b)) < 10;
-      const click = (e: L.LeafletMouseEvent) => {
-        if (pts.length >= 3 && near(e.latlng, pts[0])) { finish(pts.slice()); return; }
-        if (pts.length && near(e.latlng, pts[pts.length - 1])) return; // second click of a double-click
-        pts.push(e.latlng);
-        line.setLatLngs(pts);
-        L.circleMarker(e.latlng, { pane: 'drawn', radius: pts.length === 1 ? 6 : 4, color: '#08A045', weight: 2, fillColor: '#fff', fillOpacity: 1, interactive: false }).addTo(vertices);
+      const pts: [number, number][] = [];
+      let cursor: [number, number] | null = null;
+      const near = (a: [number, number], b: [number, number]) => {
+        const pa = m.project(a), pb = m.project(b);
+        return Math.hypot(pa.x - pb.x, pa.y - pb.y) < 10;
       };
-      const move = (e: L.LeafletMouseEvent) => { if (pts.length) guide.setLatLngs([pts[pts.length - 1], e.latlng, pts[0]]); };
-      const dbl = () => { if (pts.length >= 3) finish(pts.slice()); };
+      const render = () => {
+        const fs: Feature[] = [];
+        if (pts.length >= 2) fs.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: pts } });
+        if (pts.length && cursor) fs.push({ type: 'Feature', properties: { guide: 1 }, geometry: { type: 'LineString', coordinates: [pts[pts.length - 1], cursor, pts[0]] } });
+        if (pts.length >= 3) fs.push({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[...pts, pts[0]]] } });
+        pts.forEach((p, i) => fs.push({ type: 'Feature', properties: { first: i === 0 ? 1 : 0 }, geometry: { type: 'Point', coordinates: p } }));
+        draft(fs);
+      };
+      const click = (e: MapMouseEvent) => {
+        const p: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+        if (pts.length >= 3 && near(p, pts[0])) { finish(pts.slice()); return; }
+        if (pts.length && near(p, pts[pts.length - 1])) return; // second click of a double-click
+        pts.push(p);
+        render();
+      };
+      const move = (e: MapMouseEvent) => { cursor = [e.lngLat.lng, e.lngLat.lat]; if (pts.length) render(); };
+      const dbl = (e: MapMouseEvent) => { e.preventDefault(); if (pts.length >= 3) finish(pts.slice()); };
       const key = (e: KeyboardEvent) => {
         if (e.key === 'Escape') cancel();
         if (e.key === 'Enter' && pts.length >= 3) finish(pts.slice());
-        if (e.key === 'Backspace' && pts.length) {
-          pts.pop(); line.setLatLngs(pts);
-          const ls = vertices.getLayers(); if (ls.length) vertices.removeLayer(ls[ls.length - 1]);
-        }
+        if (e.key === 'Backspace' && pts.length) { pts.pop(); render(); }
       };
       m.on('click', click); m.on('mousemove', move); m.on('dblclick', dbl);
       window.addEventListener('keydown', key);
       cleanup = () => {
         m.off('click', click); m.off('mousemove', move); m.off('dblclick', dbl);
         window.removeEventListener('keydown', key);
-        line.remove(); guide.remove(); vertices.remove();
+        draft([]);
         setTimeout(() => m.doubleClickZoom.enable(), 300);
-        container.style.cursor = '';
+        canvas.style.cursor = '';
       };
     }
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') cancel(); };
@@ -576,5 +761,18 @@ export const MapView: FC<Props> = (props) => {
     return () => { window.removeEventListener('keydown', esc); cleanup(); };
   }, [drawMode]);
 
-  return <div ref={box} style={{ position: 'absolute', inset: 0 }} aria-label="Map of Selangor" />;
+  return (
+    <div ref={box} className="ml-map" aria-label="Map of Selangor">
+      <div ref={tip} className="map-tip" hidden role="tooltip" />
+    </div>
+  );
 };
+
+/** Shift a fly-to target so it lands in the middle of the uncovered part of the map. */
+function centerOffset(p: MapPadding): [number, number] {
+  return [(p.left - p.right) / 2, (p.top - p.bottom) / 2];
+}
+
+function pad(p: MapPadding, extra: number): MapPadding {
+  return { top: p.top + extra, bottom: p.bottom + extra, left: p.left + extra, right: p.right + extra };
+}

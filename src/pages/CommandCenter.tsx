@@ -16,7 +16,7 @@ import type { AgentView } from '../copilot/agentTools';
 import { useAgent, type AgentSession } from '../copilot/useAgent';
 import { TopBar } from '../components/command/TopBar';
 import { DaerahPanel } from '../components/command/DaerahPanel';
-import { MapView, type Basemap, type DrawMode, type LayerState, type MapFocus, type MapInspect } from '../components/command/MapView';
+import { MapView, type Basemap, type DrawMode, type LayerState, type MapFocus, type MapInspect, type MapPadding } from '../components/command/MapView';
 import { MapChrome } from '../components/command/MapChrome';
 import { RankingCard } from '../components/command/RankingCard';
 import { AreaReportCard, type DrawnArea } from '../components/command/AreaReport';
@@ -44,9 +44,12 @@ function reportFor(grid: Grid, model: ModelSpec, items: Facility[], rings: Ring[
 }
 
 const DEFAULT_LAYERS: LayerState = {
-  susceptibility: true, showLow: true, history: false, sites: false, rivers: true, boundaries: true, built: false,
-  safe: false, rail: false, hospital: false, clinic: false, school: false, emergency: false,
+  susceptibility: true, showLow: false, history: false, sites: false, rivers: false, boundaries: true, built: false,
+  safe: false, rail: true, hospital: false, clinic: false, school: false, emergency: false,
 };
+// room the floating search, chips and buttons take, so fitted views stay visible
+const PAD_DESKTOP: MapPadding = { top: 112, bottom: 28, left: 16, right: 68 };
+const PAD_PHONE: MapPadding = { top: 112, bottom: 160, left: 12, right: 12 };
 
 export const CommandCenter: FC = () => {
   const [bundle, setBundle] = useState<AppDataBundle | null>(null);
@@ -160,7 +163,7 @@ export const CommandCenter: FC = () => {
         return;
       }
       setNotice('Showing your location. It stays on this device unless you ask the copilot about it.');
-      setInspect({ lat, lon, title: 'Your location', token: Date.now() });
+      setInspect({ lat, lon, title: 'Your location', me: true, token: Date.now() });
     }, err => {
       setLocating(false);
       setNotice(err.code === err.PERMISSION_DENIED ? 'Location permission was declined.' : 'Could not get your location.');
@@ -260,6 +263,7 @@ export const CommandCenter: FC = () => {
       <MapView
         bundle={bundle} grid={grid} scenario={scenario} layers={layers} basemap={basemap}
         selectedDaerah={selected} drawn={area?.rings ?? null} drawMode={drawMode} focus={focus} inspect={inspect} resetToken={resetToken}
+        padding={isPhone ? PAD_PHONE : PAD_DESKTOP}
         onSelectDaerah={selectDaerah}
         onDrawn={rings => { addArea(rings); if (isPhone) { setSheetTab('area'); setSnap('half'); } }}
         onDrawModeChange={setDrawMode}

@@ -39,7 +39,7 @@ def http_get(url: str, headers: dict | None = None, retries: int = 4) -> bytes:
             if r.status_code == 404:
                 raise FileNotFoundError(url)
             raise RuntimeError(f"HTTP {r.status_code} for {url}")
-        except (requests.ConnectionError, requests.Timeout, RuntimeError):
+        except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError, RuntimeError):
             if attempt == retries:
                 raise
             time.sleep(delay)

@@ -13,17 +13,22 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
     "jspdf": "^4.2.1",
-    "leaflet": "^1.9.4",
+    "maplibre-gl": "6.11.2",
+    "pmtiles": "4.5.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@types/leaflet": "^1.9.12",
+    "@mapbox/vector-tile": "3.0.0",
+    "@maplibre/geojson-vt": "6.1.1",
+    "@maplibre/maplibre-gl-style-spec": "26.4.4",
+    "@maplibre/vt-pbf": "4.3.2",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
     "oxlint": "^1.75.0",
+    "pbf": "5.1.2",
     "typescript": "~6.0.2",
     "vite": "^8.2.0",
     "vitest": "^5.0.5"

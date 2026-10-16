@@ -43,12 +43,11 @@ const CHIPS: { key: keyof LayerState; label: string; icon: string; needsDetail?:
 ];
 
 const BASEMAPS: { key: Basemap; label: string; swatch: string; google?: boolean }[] = [
-  { key: 'streets', label: 'Streets', swatch: 'linear-gradient(135deg,#f2efe9 55%,#fbd9a6 55% 62%,#aad3df 62%)' },
-  { key: 'light', label: 'Light', swatch: 'linear-gradient(135deg,#f5f5f3 60%,#dcdcdc 60% 66%,#d4dadc 66%)' },
-  { key: 'osm', label: 'OpenStreetMap', swatch: 'linear-gradient(135deg,#f2efe9 50%,#e8a5a5 50% 57%,#cdebb0 57%)' },
-  { key: 'google', label: 'Google Map', swatch: 'linear-gradient(135deg,#e8f5e9 52%,#fde293 52% 58%,#9fd3f0 58%)', google: true },
+  { key: 'streets', label: 'Default', swatch: 'linear-gradient(135deg,#c8e8cf 46%,#fff 46% 50%,#fcdb86 50% 56%,#eef0f3 56% 76%,#9dcbf3 76%)' },
+  { key: 'light', label: 'Light', swatch: 'linear-gradient(135deg,#e5ede5 46%,#fff 46% 52%,#f2f2f1 52% 76%,#cfe0ee 76%)' },
+  { key: 'none', label: 'Plain', swatch: 'linear-gradient(135deg,#f1f3f4 0 100%)' },
+  { key: 'google', label: 'Google', swatch: 'linear-gradient(135deg,#e8f5e9 52%,#fde293 52% 58%,#9fd3f0 58%)', google: true },
   { key: 'google-sat', label: 'Satellite', swatch: 'linear-gradient(135deg,#3d5a3a 40%,#6b7d4f 40% 70%,#2c4a5e 70%)', google: true },
-  { key: 'none', label: 'No base', swatch: 'repeating-linear-gradient(45deg,#f3f4f6 0 6px,#e5e7eb 6px 12px)' },
 ];
 
 const OVERLAYS: { key: keyof LayerState; label: string; color: string; needsDetail?: boolean; sub?: boolean }[] = [
@@ -56,8 +55,8 @@ const OVERLAYS: { key: keyof LayerState; label: string; color: string; needsDeta
   { key: 'showLow', label: 'Shade Low class too', color: RISK_COLOR.Low, sub: true },
   { key: 'history', label: 'Water history 1984–2021 (JRC)', color: rgb(HISTORY_RGB) },
   { key: 'sites', label: 'Reported floods, Dec 2021', color: '#111111' },
-  { key: 'rivers', label: 'Rivers & canals', color: RIVER_COLOR },
-  { key: 'rail', label: 'Rail lines & stations', color: '#374151' },
+  { key: 'rivers', label: 'Highlight rivers & canals', color: RIVER_COLOR },
+  { key: 'rail', label: 'Rail lines & stations', color: '#047940' },
   { key: 'boundaries', label: 'Daerah boundaries', color: '#111111' },
   { key: 'built', label: 'Built-up 2021', color: rgb(BUILT_RGB) },
   { key: 'safe', label: 'Safe land (screened)', color: rgb(SAFE_RGB), needsDetail: true },
@@ -165,12 +164,12 @@ export const MapChrome: FC<Props> = (p) => {
             {p.layers.susceptibility && (['High', 'Moderate', ...(p.layers.showLow ? ['Low'] : [])] as ('High' | 'Moderate' | 'Low')[]).map(c => (
               <div className="row" key={c}><i style={{ background: RISK_COLOR[c], opacity: c === 'Low' ? 0.5 : 0.8 }} />{c}</div>
             ))}
-            {facilitiesOn && <div className="row"><i className="dot" style={{ background: RISK_COLOR.High }} />Facility in High (dot colour = class)</div>}
+            {facilitiesOn && <div className="row"><i className="dot pin" />Facility pin colour = its flood class</div>}
             {p.layers.safe && <div className="row"><i style={{ background: rgb(SAFE_RGB), opacity: 0.7 }} />Safe land (screened)</div>}
             {p.layers.history && <div className="row"><i style={{ background: rgb(HISTORY_RGB) }} />Seen as water 1984–2021</div>}
             {p.layers.sites && <div className="row"><i className="dot" />Reported flood, Dec 2021</div>}
             {p.layers.rivers && <div className="row"><i className="line" style={{ background: RIVER_COLOR }} />River / canal (OSM)</div>}
-            {p.layers.rail && <div className="row"><i className="line" style={{ background: '#374151' }} />Rail{p.layers.susceptibility ? '' : ' (operator colours)'}</div>}
+            {p.layers.rail && <div className="row"><i className="line rail" />Rail lines (operator colours)</div>}
             {p.layers.built && <div className="row"><i style={{ background: rgb(BUILT_RGB), opacity: 0.6 }} />Built-up 2021</div>}
             {p.layers.boundaries && <div className="row"><i style={{ background: '#9CA3AF', opacity: 0.6 }} />Federal territory (excluded)</div>}
           </>

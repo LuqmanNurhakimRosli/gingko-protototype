@@ -40,5 +40,7 @@ export default defineConfig(({ mode }) => {
       COPILOT_EFFORT: env.COPILOT_EFFORT,
     })],
     server: { port: 5173 },
+    // MapLibre's tile worker is an ES module (see MapView.tsx)
+    worker: { format: 'es' as const },
   }
 })
