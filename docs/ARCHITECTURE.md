@@ -31,7 +31,7 @@ flowchart LR
   end
   B <-->|POST /api/copilot<br/>history + tool results| C
   subgraph C["③ Copilot proxy (Cloudflare Pages Function)"]
-    F[server/copilot.ts<br/>fixed system prompt + tools + model] <--> CL[(Claude API<br/>claude-opus-5-5)]
+    F[server/copilot.ts<br/>fixed system prompt + tools + model] <--> CL[(OpenRouter<br/>or Claude API)]
     F <--> KV[(shared reply cache<br/>KV / edge cache)]
   end
 ```
@@ -56,6 +56,8 @@ Heavy work happens here, once. The app never fetches a DEM or calls Overpass on 
 - **Exports**: PDF planning brief (with the AI-drafted summary when there is one) and GeoJSON for any drawn area.
 
 ## ③ AI copilot — what model, where, and why
+
+The copilot runs on **OpenRouter** (`OPENROUTER_API_KEY`) or the **Claude API** directly (`ANTHROPIC_API_KEY`); see *Setting up the APIs* below. The table below describes the direct Claude API settings; on OpenRouter the model is `OPENROUTER_MODEL` and the cost per answer is the one OpenRouter reports.
 
 ### Where AI is (and isn't) in Ginkgo
 
@@ -142,7 +144,20 @@ sequenceDiagram
 
 ## Setting up the APIs
 
-### Claude (copilot)
+### Option A — OpenRouter (copilot)
+
+One OpenRouter key gives access to Claude and many other models; OpenRouter bills per request and reports the cost of each one, which the app shows under every answer.
+
+1. Create a key at **openrouter.ai/keys**, add credits, and set a credit limit on the key.
+2. **Local:** `cp .env.example .env.local`, put the key in `OPENROUTER_API_KEY`, run `npm run dev`.
+3. **Model:** the default is `anthropic/claude-opus-5.5`. Check the exact slug on **openrouter.ai/models** and set `OPENROUTER_MODEL` if it differs, or to pick another model; it must support **tool calling**. Examples: a Claude Sonnet or Haiku slug for lower cost.
+4. **Cloudflare Pages:** add `OPENROUTER_API_KEY` as a **secret**, plus optional `OPENROUTER_MODEL`, `COPILOT_SITE_URL` (your public URL, sent as `HTTP-Referer` so the app is named on OpenRouter), `COPILOT_EFFORT`, `COPILOT_ALLOWED_ORIGINS`, and the `COPILOT_CACHE` KV binding (step 3 of option B describes these).
+
+How it works (`server/openrouter.ts`): the browser's agent loop is unchanged. The proxy translates the conversation to OpenRouter's chat-completions format (the same 11 tools as function definitions, tool results as `tool` messages, `reasoning: {effort}`, `usage: {include: true}`) and translates the reply back. Reasoning that a model returns between tool calls (`reasoning_details`) is kept in the append-only history and sent back unchanged, which models that think between tool calls need. For `anthropic/*` models the fixed system prompt carries a `cache_control` breakpoint so the prompt prefix is cached; other providers cache automatically. A wrong model slug or other request error is shown with OpenRouter's own message.
+
+`AI_PROVIDER=openrouter|anthropic` picks the provider when both keys are set; unset, OpenRouter is used when `OPENROUTER_API_KEY` is present. The Claude-API-only settings (server-side refusal fallback, thinking block binding, `output_config.effort`) apply only to option B.
+
+### Option B — Claude API directly (copilot)
 
 1. Create an API key in the Anthropic Console and set a monthly spend limit.
 2. **Local:** `cp .env.example .env.local`, put the key in `ANTHROPIC_API_KEY`, run `npm run dev`. Vite serves `/api/copilot` from `server/copilot.ts`. The key stays in the dev server and never reaches the browser bundle.

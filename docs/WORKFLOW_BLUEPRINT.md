@@ -167,7 +167,7 @@ sequenceDiagram
 | | |
 |---|---|
 | **Input** | A question in English or Bahasa Melayu — typed, from a suggestion card, from the map search box (questions are recognised and routed to Ginkgo), or by voice; plus a small map-context block (scenario, selected daerah, active area, last clicked cell) |
-| **Process** | ① The browser sends the append-only history to `/api/copilot` · ② the server adds the fixed system prompt, 11 strict tools, model and effort; checks the shared cache · ③ Claude asks for tools, often several at once · ④ the browser runs them over the same grid the panels use (1–150 ms each) · ⑤ repeat until Claude answers (max 8 rounds) · ⑥ grounding check: each figure in the answer must match a tool-result number with a compatible unit at the precision written |
+| **Process** | ① The browser sends the append-only history to `/api/copilot` · ② the server adds the fixed system prompt, 11 strict tools, model and effort, checks the shared cache, and calls **OpenRouter** (translating to and from its chat-completions format) or the **Claude API** directly · ③ Claude asks for tools, often several at once · ④ the browser runs them over the same grid the panels use (1–150 ms each) · ⑤ repeat until Claude answers (max 8 rounds) · ⑥ grounding check: each figure in the answer must match a tool-result number with a compatible unit at the precision written |
 | **Output** | Answer with plain-language steps, a ✓/⚠ figure check (unmatched figures highlighted), a cost line (model calls, tokens, prompt-cache share, US$ estimate, seconds), and visible map changes |
 
 **The 11 tools** (`src/copilot/agentSpec.ts`, run in `src/copilot/agentTools.ts`):
@@ -217,13 +217,14 @@ AI-drafted with its figure check.
 | **Shared reply cache** | Visitors who ask the same thing in the same view get the stored reply instantly at no API cost (KV, edge cache, or in-memory in dev); any difference in history misses, so answers never leak across contexts | `server/copilot.ts`, `functions/api/copilot.ts` |
 | **Parallel tool calls** | The prompt asks for independent tools in one turn → fewer round trips | system prompt |
 | **Map control instead of prose** | `set_map_view` shows a scenario, daerah or layer rather than describing it at length | `set_map_view` |
-| **Right-sized model and effort** | `claude-opus-5-5` at `medium` effort by default; `COPILOT_MODEL=claude-sonnet-5-5` ($2 / $10) or `claude-haiku-5-5` ($0.10 / $0.50) and `COPILOT_EFFORT=low` with no code change | env vars |
+| **Right-sized model and effort** | Claude Opus at `medium` effort by default; switch to a Sonnet or Haiku model (`OPENROUTER_MODEL`, or `COPILOT_MODEL=claude-sonnet-5-5` / `claude-haiku-5-5` on the Claude API) and `COPILOT_EFFORT=low` with no code change | env vars |
+| **One key, any model (OpenRouter)** | Compare models on the same tools and figure check by changing one setting; OpenRouter reports the actual cost of every call, which the meter shows instead of an estimate | `server/openrouter.ts` |
 | **Hard limits** | ≤ 8 tool rounds, ≤ 120 messages, ≤ 600 KB per conversation, origin allow-list | `agentSpec.ts`, `server/copilot.ts` |
 | **Template fallback** | No key → $0 and still useful | `explainer.ts` |
-| **Measured, not guessed** | Each answer shows its model calls, tokens, prompt-cache share, shared-cache hits and US$ estimate, read from the API's `usage` report; the top bar shows the session total | `Copilot.tsx`, `TopBar.tsx` |
+| **Measured, not guessed** | Each answer shows its model calls, tokens, prompt-cache share, shared-cache hits and cost — the cost OpenRouter reports, or a list-price estimate from the Claude API's `usage`; the top bar shows the session total | `Copilot.tsx`, `TopBar.tsx` |
 
-A typical question costs a few US cents on Opus 5.5 and roughly half that on Sonnet 5.5. The meter under each answer shows the real
-figure; set a monthly spend limit in the Anthropic Console before a public event.
+A typical question costs a few US cents on Claude Opus and roughly half that on Sonnet. The meter under each answer shows the
+figure; before a public event set a credit limit on the OpenRouter key (or a monthly spend limit in the Anthropic Console).
 
 ## 11. Guardrails and honesty
 
@@ -238,7 +239,7 @@ figure; set a monthly spend limit in the Anthropic Console before a public event
 
 | | |
 |---|---|
-| **Input** | This repository · `ANTHROPIC_API_KEY` (secret) · optional `COPILOT_MODEL`, `COPILOT_EFFORT`, `COPILOT_ALLOWED_ORIGINS`, KV binding `COPILOT_CACHE`, `VITE_GOOGLE_MAPS_API_KEY` |
+| **Input** | This repository · `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY` (secret) · optional `OPENROUTER_MODEL` / `COPILOT_MODEL`, `AI_PROVIDER`, `COPILOT_SITE_URL`, `COPILOT_EFFORT`, `COPILOT_ALLOWED_ORIGINS`, KV binding `COPILOT_CACHE`, `VITE_GOOGLE_MAPS_API_KEY` |
 | **Process** | `npm run build` → Cloudflare Pages serves `dist/` and turns `functions/` into `/api/copilot` · add a rate-limit rule on `/api/copilot` and a Console spend limit |
 | **Output** | A public URL; the map and data are static files, only questions to Ginkgo reach the server |
 

@@ -42,6 +42,7 @@ export type AgentMode = 'checking' | 'ai' | 'off';
 export function useAgent(session: RefObject<AgentSession | null>) {
   const [mode, setMode] = useState<AgentMode>('checking');
   const [model, setModel] = useState<string | null>(null);
+  const [provider, setProvider] = useState<string | null>(null);
   const [entries, setEntries] = useState<AgentEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [totals, setTotals] = useState<SessionTotals>(ZERO);
@@ -52,7 +53,7 @@ export function useAgent(session: RefObject<AgentSession | null>) {
 
   useEffect(() => {
     let alive = true;
-    fetchAgentStatus().then(s => { if (alive) { setMode(s.enabled ? 'ai' : 'off'); setModel(s.model); } });
+    fetchAgentStatus().then(s => { if (alive) { setMode(s.enabled ? 'ai' : 'off'); setModel(s.model); setProvider(s.provider); } });
     return () => { alive = false; };
   }, []);
 
@@ -104,7 +105,7 @@ export function useAgent(session: RefObject<AgentSession | null>) {
     setEntries([]);
   }, []);
 
-  return { mode, model, entries, busy, totals, ask, reset };
+  return { mode, model, provider, entries, busy, totals, ask, reset };
 }
 
 export type Agent = ReturnType<typeof useAgent>;

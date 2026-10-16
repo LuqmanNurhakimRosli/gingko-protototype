@@ -1,6 +1,7 @@
-// Ginkgo Copilot — server-side proxy to the Claude API.
+// Ginkgo Copilot — server-side proxy to the model provider: the Claude API
+// directly, or OpenRouter (server/openrouter.ts).
 // Runs as a Cloudflare Pages Function (functions/api/copilot.ts) and as Vite
-// dev/preview middleware (vite.config.ts). The API key never reaches the browser.
+// dev/preview middleware (vite.config.ts). API keys never reach the browser.
 //
 // The browser owns the conversation and runs the tools; this handler only adds
 // the fixed system prompt, tool list and model, and forwards the history as-is.
@@ -8,7 +9,8 @@
 // thinking blocks valid across turns.
 
 import Anthropic from '@anthropic-ai/sdk';
-import { DEFAULT_EFFORT, DEFAULT_MODEL, LIMITS, SYSTEM_PROMPT, TOOLS } from '../src/copilot/agentSpec';
+import { DEFAULT_EFFORT, DEFAULT_MODEL, DEFAULT_OPENROUTER_MODEL, LIMITS, SYSTEM_PROMPT, TOOLS } from '../src/copilot/agentSpec';
+import { callOpenRouter, type HistoryMessage } from './openrouter';
 
 /** Shared store of finished API replies, keyed by a hash of the whole request.
  *  Visitors who tap the same suggestion with the same map view get the stored
@@ -43,9 +45,16 @@ export async function cacheKey(model: string, effort: string, messages: unknown)
 }
 
 export interface CopilotEnv {
+  /** anthropic | openrouter. Unset: OpenRouter when OPENROUTER_API_KEY is set, else Anthropic. */
+  AI_PROVIDER?: string;
   ANTHROPIC_API_KEY?: string;
-  /** Override the model, e.g. claude-sonnet-5-5 or claude-haiku-5-5 for lower cost. */
+  /** Override the Claude API model, e.g. claude-sonnet-5-5 or claude-haiku-5-5 for lower cost. */
   COPILOT_MODEL?: string;
+  OPENROUTER_API_KEY?: string;
+  /** OpenRouter model slug as listed on openrouter.ai/models, e.g. anthropic/claude-sonnet-5.5 */
+  OPENROUTER_MODEL?: string;
+  /** Public URL of the site, sent to OpenRouter as HTTP-Referer for app attribution. */
+  COPILOT_SITE_URL?: string;
   /** low | medium | high | xhigh | max */
   COPILOT_EFFORT?: string;
   /** Comma-separated list of allowed Origin values; unset allows any. */
@@ -60,7 +69,23 @@ const BETAS: Anthropic.Beta.AnthropicBeta[] = ['server-side-fallback-2026-07-01'
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
-function modelOf(env: CopilotEnv) { return env.COPILOT_MODEL?.trim() || DEFAULT_MODEL; }
+export type Provider = 'anthropic' | 'openrouter';
+
+/** Which provider answers: AI_PROVIDER if set (and its key is present), else whichever key is set. */
+export function providerOf(env: CopilotEnv): Provider | null {
+  const want = env.AI_PROVIDER?.trim().toLowerCase();
+  if (want === 'openrouter') return env.OPENROUTER_API_KEY ? 'openrouter' : null;
+  if (want === 'anthropic') return env.ANTHROPIC_API_KEY ? 'anthropic' : null;
+  if (env.OPENROUTER_API_KEY) return 'openrouter';
+  if (env.ANTHROPIC_API_KEY) return 'anthropic';
+  return null;
+}
+
+function modelOf(env: CopilotEnv, provider: Provider | null = providerOf(env)) {
+  return provider === 'openrouter'
+    ? env.OPENROUTER_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL
+    : env.COPILOT_MODEL?.trim() || DEFAULT_MODEL;
+}
 
 /** Shape checks only — the content itself is passed through unchanged. */
 export function validateMessages(raw: unknown): { ok: true; messages: Anthropic.Beta.BetaMessageParam[] } | { ok: false; error: string } {
@@ -83,17 +108,18 @@ export function validateMessages(raw: unknown): { ok: true; messages: Anthropic.
 export async function handleCopilot(
   request: Request,
   env: CopilotEnv,
-  deps: { client?: Pick<Anthropic, 'beta'>; cache?: ResponseCache } = {},
+  deps: { client?: Pick<Anthropic, 'beta'>; cache?: ResponseCache; fetch?: typeof fetch } = {},
 ): Promise<Response> {
   const origins = env.COPILOT_ALLOWED_ORIGINS?.split(',').map(s => s.trim()).filter(Boolean);
   const origin = request.headers.get('origin');
   if (origins?.length && origin && !origins.includes(origin)) return json(403, { error: 'origin not allowed' });
 
+  const provider = providerOf(env) ?? (deps.client ? 'anthropic' : null);
   if (request.method === 'GET') {
-    return json(200, { enabled: Boolean(env.ANTHROPIC_API_KEY), model: modelOf(env) });
+    return json(200, { enabled: provider !== null, model: modelOf(env, provider), provider });
   }
   if (request.method !== 'POST') return json(405, { error: 'method not allowed' });
-  if (!env.ANTHROPIC_API_KEY && !deps.client) return json(503, { error: 'AI copilot is not configured (ANTHROPIC_API_KEY is not set)' });
+  if (!provider) return json(503, { error: 'AI copilot is not configured (set OPENROUTER_API_KEY or ANTHROPIC_API_KEY)' });
 
   const text = await request.text();
   if (text.length > LIMITS.maxBytes) return json(413, { error: 'conversation too long — start a new one' });
@@ -103,12 +129,29 @@ export async function handleCopilot(
   if (!v.ok) return json(400, { error: v.error });
 
   const effort = (EFFORTS as string[]).includes(env.COPILOT_EFFORT ?? '') ? env.COPILOT_EFFORT as Effort : DEFAULT_EFFORT;
-  const model = modelOf(env);
-  const key = deps.cache ? await cacheKey(model, effort, v.messages) : null;
+  const model = modelOf(env, provider);
+  const key = deps.cache ? await cacheKey(`${provider}:${model}`, effort, v.messages) : null;
   if (key) {
     const hit = await deps.cache!.get(key).catch(() => null);
     if (hit && typeof hit === 'object') return json(200, { ...hit, cached: true });
   }
+  // only complete, ordinary turns are worth replaying
+  const store = async (payload: { stop_reason: string | null }) => {
+    if (key && (payload.stop_reason === 'end_turn' || payload.stop_reason === 'tool_use')) {
+      await deps.cache!.put(key, payload).catch(() => {});
+    }
+  };
+
+  if (provider === 'openrouter') {
+    const r = await callOpenRouter({
+      apiKey: env.OPENROUTER_API_KEY ?? '', model, effort, history: v.messages as unknown as HistoryMessage[],
+      referer: env.COPILOT_SITE_URL?.trim() || origin || undefined, fetchImpl: deps.fetch,
+    });
+    if (!r.ok) return json(r.status, { error: r.error });
+    await store(r.reply);
+    return json(200, { ...r.reply, cached: false });
+  }
+
   const client = deps.client ?? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   try {
     const response = await client.beta.messages.create({
@@ -137,10 +180,7 @@ export async function handleCopilot(
       stop_details: response.stop_details ?? null,
       usage: response.usage,
     };
-    // only complete, ordinary turns are worth replaying
-    if (key && (response.stop_reason === 'end_turn' || response.stop_reason === 'tool_use')) {
-      await deps.cache!.put(key, payload).catch(() => {});
-    }
+    await store(payload);
     return json(200, { ...payload, cached: false });
   } catch (err) {
     if (err instanceof Anthropic.RateLimitError) return json(429, { error: 'The AI service is busy — try again in a moment.' });

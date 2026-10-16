@@ -9,7 +9,7 @@
 import { useEffect, useEffectEvent, useRef, useState, type FC } from 'react';
 import { answer, detectIntent, SUGGESTIONS, type Answer, type CopilotContext, type Intent } from '../../copilot/explainer';
 import type { TurnUsage } from '../../copilot/agentClient';
-import { modelName } from '../../copilot/models';
+import { modelName, providerName } from '../../copilot/models';
 import type { Agent, AgentEntry } from '../../copilot/useAgent';
 import { Markdown } from './Markdown';
 
@@ -200,7 +200,7 @@ export const Copilot: FC<Props> = ({ chips, getContext, request, agent, focusTok
         </div>
         <div className="copilot-head-right">
           <span className={`ai-pill ${agent.mode}`}
-            title={ai ? `Live AI agent with tool use${t.answers ? ` · this session: ${t.answers} answer${t.answers === 1 ? '' : 's'}, ${fmtUsd(t.costUsd)}, ${t.cachedRounds} cached call${t.cachedRounds === 1 ? '' : 's'}` : ''}` : 'Template answers — no AI model configured'}>
+            title={ai ? `Live AI agent with tool use${providerName(agent.provider) ? ` via ${providerName(agent.provider)}` : ''}${t.answers ? ` · this session: ${t.answers} answer${t.answers === 1 ? '' : 's'}, ${fmtUsd(t.costUsd)}, ${t.cachedRounds} cached call${t.cachedRounds === 1 ? '' : 's'}` : ''}` : 'Template answers — no AI model configured'}>
             {agent.mode === 'checking' ? '…' : ai ? `✦ ${modelName(agent.model)}` : 'Template'}
           </span>
           {count > 0 && <button className="btn btn-ghost btn-sm" onClick={() => (ai ? agent.reset() : setMsgs([]))}>New chat</button>}
@@ -267,7 +267,7 @@ export const Copilot: FC<Props> = ({ chips, getContext, request, agent, focusTok
           {ai
             ? 'Claude answers by calling tools over the computed layers; it cannot change any number, and figures it cannot trace to a tool result are flagged.'
             : agent.mode === 'off'
-              ? 'Template mode: answers are assembled from the computed figures. Set ANTHROPIC_API_KEY on the server to switch on the Claude agent.'
+              ? 'Template mode: answers are assembled from the computed figures. Set OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) on the server to switch on the AI agent.'
               : 'Checking for the AI copilot…'}
         </div>
       </div>

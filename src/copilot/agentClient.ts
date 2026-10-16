@@ -38,7 +38,11 @@ export interface AgentReply {
   usage: TurnUsage;
 }
 
-interface ApiUsage { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null }
+interface ApiUsage {
+  input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null;
+  /** actual US$ charged, when the provider reports it (OpenRouter does) */
+  cost_usd?: number;
+}
 
 export function costOf(model: string | null, u: Pick<TurnUsage, 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens'>): number | null {
   const p = PRICES[(model ?? '').replace(/-\d{8}$/, '')];
@@ -46,18 +50,18 @@ export function costOf(model: string | null, u: Pick<TurnUsage, 'inputTokens' | 
   return (u.inputTokens * p.input + u.outputTokens * p.output + u.cacheReadTokens * p.cacheRead + u.cacheWriteTokens * p.cacheWrite) / 1e6;
 }
 
-export interface AgentStatus { enabled: boolean; model: string | null }
+export interface AgentStatus { enabled: boolean; model: string | null; provider: string | null }
 
 export const COPILOT_ENDPOINT = '/api/copilot';
 
 export async function fetchAgentStatus(fetchImpl: typeof fetch = fetch): Promise<AgentStatus> {
   try {
     const r = await fetchImpl(COPILOT_ENDPOINT, { method: 'GET' });
-    if (!r.ok || !(r.headers.get('content-type') ?? '').includes('application/json')) return { enabled: false, model: null };
-    const j = await r.json() as { enabled?: boolean; model?: string };
-    return { enabled: Boolean(j.enabled), model: j.model ?? null };
+    if (!r.ok || !(r.headers.get('content-type') ?? '').includes('application/json')) return { enabled: false, model: null, provider: null };
+    const j = await r.json() as { enabled?: boolean; model?: string; provider?: string | null };
+    return { enabled: Boolean(j.enabled), model: j.model ?? null, provider: j.provider ?? null };
   } catch {
-    return { enabled: false, model: null };
+    return { enabled: false, model: null, provider: null };
   }
 }
 
@@ -100,7 +104,13 @@ export async function runAgentTurn(opts: {
   let model: string | null = null;
   const t0 = Date.now();
   const usage: TurnUsage = { rounds: 0, cachedRounds: 0, inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, costUsd: 0, ms: 0 };
-  const finish = () => ({ ...usage, costUsd: costOf(model, usage), ms: Date.now() - t0 });
+  // prefer the cost the provider reports; fall back to list prices for the Claude API
+  let reported = 0, reportedRounds = 0, billedRounds = 0;
+  const finish = () => ({
+    ...usage,
+    costUsd: billedRounds > 0 && reportedRounds === billedRounds ? reported : costOf(model, usage),
+    ms: Date.now() - t0,
+  });
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const res = await doFetch(COPILOT_ENDPOINT, {
@@ -115,6 +125,8 @@ export async function runAgentTurn(opts: {
     usage.rounds++;
     if (data.cached) usage.cachedRounds++;
     else if (data.usage) {
+      billedRounds++;
+      if (typeof data.usage.cost_usd === 'number') { reported += data.usage.cost_usd; reportedRounds++; }
       usage.inputTokens += data.usage.input_tokens ?? 0;
       usage.outputTokens += data.usage.output_tokens ?? 0;
       usage.cacheReadTokens += data.usage.cache_read_input_tokens ?? 0;

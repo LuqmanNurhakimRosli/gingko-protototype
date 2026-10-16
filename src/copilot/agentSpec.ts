@@ -6,6 +6,8 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
 export const DEFAULT_MODEL = 'claude-opus-5-5';
+/** Default when the server uses OpenRouter; override with OPENROUTER_MODEL (any slug from openrouter.ai/models). */
+export const DEFAULT_OPENROUTER_MODEL = 'anthropic/claude-opus-5.5';
 export const DEFAULT_EFFORT = 'medium';
 export const MAX_TOOL_ROUNDS = 8;
 export const LIMITS = { maxMessages: 120, maxBytes: 600_000 };

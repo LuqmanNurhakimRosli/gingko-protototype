@@ -2,7 +2,7 @@
 
 import type { FC } from 'react';
 import type { Scenario } from '../../data/types';
-import { modelName } from '../../copilot/models';
+import { modelName, providerName } from '../../copilot/models';
 import type { SessionTotals } from '../../copilot/useAgent';
 
 interface Props {
@@ -11,10 +11,11 @@ interface Props {
   onOpenMethod: () => void;
   aiMode: 'checking' | 'ai' | 'off';
   aiModel: string | null;
+  aiProvider: string | null;
   totals: SessionTotals;
 }
 
-export const TopBar: FC<Props> = ({ scenario, subjectLabel, onOpenMethod, aiMode, aiModel, totals }) => (
+export const TopBar: FC<Props> = ({ scenario, subjectLabel, onOpenMethod, aiMode, aiModel, aiProvider, totals }) => (
   <header className="cc-top">
     <div className="brand-logo" aria-label="Ginkgo">
       <div className="brand-icon">G</div>
@@ -32,7 +33,7 @@ export const TopBar: FC<Props> = ({ scenario, subjectLabel, onOpenMethod, aiMode
     </div>
     <div className="cc-top-right">
       <span className={`ai-status ${aiMode}`} title={aiMode === 'ai'
-        ? `AI copilot live${totals.answers ? ` · ${totals.answers} answer${totals.answers === 1 ? '' : 's'} this session, ≈US$${totals.costUsd.toFixed(2)}${totals.cachedRounds ? `, ${totals.cachedRounds} served from cache` : ''}` : ''}`
+        ? `AI copilot live${providerName(aiProvider) ? ` via ${providerName(aiProvider)}` : ''}${totals.answers ? ` · ${totals.answers} answer${totals.answers === 1 ? '' : 's'} this session, ≈US$${totals.costUsd.toFixed(2)}${totals.cachedRounds ? `, ${totals.cachedRounds} served from cache` : ''}` : ''}`
         : aiMode === 'off' ? 'No AI key on the server — template answers' : 'Checking the AI copilot…'}>
         <i aria-hidden />{aiMode === 'ai' ? modelName(aiModel) : aiMode === 'off' ? 'Template mode' : 'Checking AI…'}
       </span>

@@ -37,6 +37,10 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), copilotApi({
       ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
+      AI_PROVIDER: env.AI_PROVIDER,
+      OPENROUTER_API_KEY: env.OPENROUTER_API_KEY,
+      OPENROUTER_MODEL: env.OPENROUTER_MODEL,
+      COPILOT_SITE_URL: env.COPILOT_SITE_URL,
       COPILOT_MODEL: env.COPILOT_MODEL,
       COPILOT_EFFORT: env.COPILOT_EFFORT,
       COPILOT_ALLOWED_ORIGINS: env.COPILOT_ALLOWED_ORIGINS,

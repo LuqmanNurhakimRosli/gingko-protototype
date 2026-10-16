@@ -26,9 +26,9 @@ const post = (body: unknown, headers: Record<string, string> = {}) =>
 describe('copilot proxy', () => {
   it('reports whether the AI is configured', async () => {
     const off = await (await handleCopilot(new Request('http://x/api/copilot'), {})).json();
-    expect(off).toEqual({ enabled: false, model: 'claude-opus-5-5' });
+    expect(off).toEqual({ enabled: false, model: 'claude-opus-5-5', provider: null });
     const on = await (await handleCopilot(new Request('http://x/api/copilot'), { ANTHROPIC_API_KEY: 'k', COPILOT_MODEL: 'claude-sonnet-5-5' })).json();
-    expect(on).toEqual({ enabled: true, model: 'claude-sonnet-5-5' });
+    expect(on).toEqual({ enabled: true, model: 'claude-sonnet-5-5', provider: 'anthropic' });
   });
 
   it('refuses to run without a key', async () => {

@@ -34,14 +34,15 @@ The map looks and works like Google Maps: a self-hosted vector basemap in a Goog
 
 ```bash
 npm install
-cp .env.example .env.local   # optional: ANTHROPIC_API_KEY for the AI copilot, VITE_GOOGLE_MAPS_API_KEY for Google tiles
+cp .env.example .env.local   # optional: OPENROUTER_API_KEY (or ANTHROPIC_API_KEY) for the AI copilot, VITE_GOOGLE_MAPS_API_KEY for Google tiles
 npm run dev        # http://localhost:5173 (also serves /api/copilot)
-npm test           # 42 tests: app numbers vs pipeline, basemap, tools, site screen, agent loop, proxy & cache, grounding check
+npm test           # 52 tests: app numbers vs pipeline, basemap, tools, site screen, agent loop, proxy & cache, OpenRouter, grounding check
 npm run build      # static site in dist/ + functions/ for Cloudflare Pages
 ```
 
 Deploy on Cloudflare Pages with build command `npm run build` and output `dist`. The `functions/` folder becomes
-`/api/copilot`. Set `ANTHROPIC_API_KEY` as a secret there (details in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)).
+`/api/copilot`. Set `OPENROUTER_API_KEY` (or `ANTHROPIC_API_KEY`) as a secret there, and optionally `OPENROUTER_MODEL`
+(details in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#setting-up-the-apis)).
 The map itself is fully static: it reads the precomputed files in `public/data/` (≈6.7 MB; the 1.5 MB core grid paints the map,
 the 3.7 MB terrain detail loads in the background) and the 23 MB basemap archive, of which only the tiles in view are fetched
 (HTTP range requests; the first Selangor view took 5 requests, 0.22 MB). Measured on a local production build (3 runs): UI ready
@@ -157,7 +158,8 @@ src/map/             basemap style (Google-like) and runtime icons (+ tests)
 src/copilot/         Claude agent: spec (prompt + tools + prices), browser tools, loop, grounding check; template explainer
 src/components/      map, map chrome, panels, copilot, sites, bottom sheet, charts
 src/services/        PDF brief and GeoJSON export
-server/copilot.ts    Claude API proxy (shared by Cloudflare and the Vite dev server)
+server/copilot.ts    copilot proxy (shared by Cloudflare and the Vite dev server): OpenRouter or the Claude API
+server/openrouter.ts translation to and from OpenRouter chat completions
 functions/api/       Cloudflare Pages Function entry
 docs/ARCHITECTURE.md architecture, AI usage, API setup
 docs/WORKFLOW_BLUEPRINT.md  every workflow as Input → Process → Output, AI efficiency, demo script
@@ -167,7 +169,7 @@ The earlier upload-an-image flow and its mock analysis data were removed; they r
 
 ## Before presenting
 
-1. **AI key and budget** — set `ANTHROPIC_API_KEY` as a secret, a monthly spend limit in the Anthropic Console, a rate-limit rule on `/api/copilot`, and (optional) the `COPILOT_CACHE` KV binding so repeated questions are free.
+1. **AI key and budget** — set `OPENROUTER_API_KEY` (with a credit limit on the key) or `ANTHROPIC_API_KEY` (with a Console spend limit) as a secret, confirm the `OPENROUTER_MODEL` slug on openrouter.ai/models, add a rate-limit rule on `/api/copilot`, and (optional) the `COPILOT_CACHE` KV binding so repeated questions are free.
 2. **Rehearse the demo** in [`docs/WORKFLOW_BLUEPRINT.md` §14](docs/WORKFLOW_BLUEPRINT.md#14-five-minute-exhibition-demo) on the presentation machine; the map works offline, the AI needs the network.
 3. **Framing** — say *riverine flood susceptibility*, not forecast; keep 50 / 120 mm/hr labelled as scenario and hypothetical stress test (the app does).
 4. **Timing** — quote measured figures (above) or measure on the venue machine. AI answers take several seconds (2–4 Claude calls per question); repeated questions come back from the cache.

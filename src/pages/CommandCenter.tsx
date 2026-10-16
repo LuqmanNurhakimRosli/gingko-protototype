@@ -459,7 +459,7 @@ export const CommandCenter: FC = () => {
   return (
     <div className="cc">
       <TopBar scenario={scenario} subjectLabel={subjectLabel} onOpenMethod={() => setMethodOpen(true)}
-        aiMode={agent.mode} aiModel={agent.model} totals={agent.totals} />
+        aiMode={agent.mode} aiModel={agent.model} aiProvider={agent.provider} totals={agent.totals} />
       <div className="cc-main">
         {daerahPanel}
         {mapBlock}
