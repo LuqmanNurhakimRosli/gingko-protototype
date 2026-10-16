@@ -46,3 +46,6 @@ npm run demo:render               # → demo/ginkgo-demo.mp4 (~5 min)
 
 `PARTS=C npm run demo:capture` re-captures one part only (A overview and analysis, B AI question, C fly-in).
 `PREVIEW=40,92.5 npm run demo:render` renders full-size stills at those times.
+
+The render comes out at about 68 MB (CRF 20). The copy in `docs/demo/` is re-encoded to keep the repo light:
+`ffmpeg -i demo/ginkgo-demo.mp4 -c:v libx264 -preset slow -crf 25 -pix_fmt yuv420p -movflags +faststart -an docs/demo/ginkgo-demo.mp4` (about 29 MB).
