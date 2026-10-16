@@ -392,6 +392,8 @@ export const MapView: FC<Props> = (props) => {
       maxBounds: [[100.66, 2.46], [102.09, 3.99]],
       renderWorldCopies: false, dragRotate: false, pitchWithRotate: false, touchPitch: false,
       attributionControl: false, fadeDuration: 150,
+      // the view is kept in the URL (#map=zoom/lat/lon) so a view can be bookmarked or shared
+      hash: 'map',
     });
     map.current = m;
     if (import.meta.env.DEV) (window as unknown as { __ginkgoMap?: MLMap }).__ginkgoMap = m;

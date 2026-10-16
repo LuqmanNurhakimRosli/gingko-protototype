@@ -1,7 +1,7 @@
 // Place search over the Overture gazetteer (Selangor, Kuala Lumpur, Putrajaya).
 // With `onAsk`, the box doubles as a prompt: a question that isn't a place goes to Ginkgo.
 
-import { useMemo, useState, type FC, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FC, type ReactNode } from 'react';
 import { searchPlaces } from '../../data/places';
 import type { Place } from '../../data/types';
 
@@ -38,14 +38,27 @@ export const PlaceSearch: FC<Props> = ({ places, onPick, placeholder = 'Search S
   const pick = (p: Place) => { onPick(p); setQ(p.n); setOpen(false); };
   const ask = () => { onAsk?.(text); setQ(''); setOpen(false); };
   const choose = (i: number) => { if (i === askIndex) ask(); else if (placeAt(i)) pick(placeAt(i)); };
+  const box = useRef<HTMLInputElement>(null);
+  // "/" focuses the search box, as in consumer map apps
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || t?.closest('input, textarea, [contenteditable="true"]')) return;
+      e.preventDefault();
+      box.current?.focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <div className={`gm-search ${className ?? ''}`} role="combobox" aria-expanded={open && results.length > 0} aria-haspopup="listbox">
       {leading}
       <input
+        ref={box}
         value={q}
         placeholder={placeholder}
-        aria-label="Search a place"
+        aria-label="Search a place or ask Ginkgo (press / to focus)"
         onChange={e => { setQ(e.target.value); setOpen(true); setActive(0); }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}

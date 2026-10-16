@@ -286,7 +286,7 @@ export function basemapStyle(variant: BaseVariant, urls: StyleUrls): StyleSpecif
       paint: { 'text-color': P.labelStrong, 'text-halo-color': P.halo, 'text-halo-width': 1.8 },
     }),
     base('place-state', {
-      type: 'symbol', source: 'base', 'source-layer': 'places', maxzoom: 9.5, filter: ['==', ['get', 'kind'], 'state'],
+      type: 'symbol', source: 'base', 'source-layer': 'places', maxzoom: 8, filter: ['==', ['get', 'kind'], 'state'],
       layout: {
         'text-field': ['get', 'name'], 'text-font': FONT.regular, 'text-transform': 'uppercase',
         'text-size': 12, 'text-letter-spacing': 0.25, 'text-max-width': 9,

@@ -8,7 +8,8 @@ open terrain, river, land-cover, water-history and census data — with its sour
 > **What it is not:** a forecast of *when* a flood will happen, or a hydraulic simulation (no depths, no return periods).
 > The copilot explains computed numbers; it never produces one.
 
-**End-to-end architecture, where AI is used, and API setup:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+**Every workflow as Input → Process → Output (incl. AI and AI efficiency):** [`docs/WORKFLOW_BLUEPRINT.md`](docs/WORKFLOW_BLUEPRINT.md) ·
+**Architecture, where AI is used, and API setup:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## What you can do
 
@@ -18,15 +19,16 @@ open terrain, river, land-cover, water-history and census data — with its sour
 | **B · Analyse a drawn area** | **▭ Rectangle** (drag) or **⬠ Polygon** (click points, double-click to finish; Backspace undoes, Esc cancels). The right panel reports area, land by class under all three scenarios, zones, population estimate, built-up %, river & canal length, elevation range, height above drainage, land cover, a development screen, and *Why this score*. Export a **PDF brief** or **GeoJSON**. |
 | **C · Compare scenarios** | Normal / Heavy (50 mm/hr, scenario) / Extreme (120 mm/hr, hypothetical stress test) in the bottom bar. The map keeps its position; **⟲ Reset view** is always there. |
 | **D · Historical check** | Toggle **Water history** (JRC Global Surface Water 1984–2021) and **Reported floods** (places reported flooded in Dec 2021, plus DEM-chosen hilly controls) to see how the modelled zones line up. |
-| **Inspect a spot** | Click the map for that ~92 m cell's class, score and inputs; *Ask copilot about this spot* adds it as context. |
+| **Inspect a spot** | Click the map for that ~92 m cell's class, score and inputs; *Ask Ginkgo about this spot* adds it as context. |
 | **Critical facilities** | Chips for Hospitals, Schools, Police & Bomba, Rail, Clinics: 2,955 mapped facilities, each coloured by the flood class of its cell, and counted per daerah and per drawn area. |
-| **Safe land** | Screens undeveloped, gentle, low-susceptibility land (not water, not forest-dominated) for early site search. |
+| **Safe land & candidate sites** | Screens undeveloped, gentle, low-susceptibility land (not water, not forest-dominated). **◍ Candidate sites** groups it into contiguous blocks that stay Low even under Extreme rain and pins them S1, S2… |
 | **Is my spot flood-prone?** | The locate button checks the visitor's own location; it stays on the device unless they ask the copilot. |
-| **Ask Ginkgo (AI)** | A Claude agent answers questions by calling tools over the computed grid (search places, analyse an area, rank daerah, list facilities at risk…), draws what it analysed on the map, and every figure in its answer is checked against the tool results. Without an API key it falls back to template answers. |
-| **Search** | 1,573 Selangor/KL/Putrajaya place names (OpenStreetMap via Overture). |
+| **Ask Ginkgo (AI)** | A Claude agent answers by calling 11 tools over the computed grid (search places, analyse an area, rank daerah, list facilities at risk, screen sites…), **operates the map** (scenario, daerah, layers) to show what it means, and every figure in its answer is checked against the tool results. Ask from the chat, the map's search box, a suggestion card, or by voice. Each answer shows its tokens and cost; repeated questions are served from a shared cache. Without an API key it falls back to template answers. |
+| **AI planning brief** | **✦ Draft brief with AI** on a drawn area: four short sections, figure-checked, and included in the PDF. |
+| **Search** | 1,573 Selangor/KL/Putrajaya place names (OpenStreetMap via Overture); press `/` to focus. A question typed here goes to Ginkgo. |
 | **Method & validation** | Top-right button: formula, weights, scenario rule table, validation results with sources, data provenance, limitations. |
 
-The map looks and works like a consumer map app: floating search, quick chips, layers panel (Streets · Light · OpenStreetMap · Google Map/Satellite with a key · No base), locate-me and reset buttons. On a phone it becomes a full-screen map with a draggable bottom sheet. **No base** runs without basemap tiles (useful offline).
+The map looks and works like Google Maps: a self-hosted vector basemap in a Google-like style (mint vegetation, white streets, yellow expressways, blue water, route shields), the flood layer under streets and labels, rail lines in operator colours, floating search, quick chips, a layers panel (Default · Light · Plain · Google/Satellite with a key), locate-me and reset buttons. The view is kept in the URL so it can be shared. On desktop the right panel has **Insights** and **✦ Ask Ginkgo** tabs; on a phone the app becomes a full-screen map with a draggable bottom sheet. The whole map works offline.
 
 ## Run it
 
@@ -34,15 +36,16 @@ The map looks and works like a consumer map app: floating search, quick chips, l
 npm install
 cp .env.example .env.local   # optional: ANTHROPIC_API_KEY for the AI copilot, VITE_GOOGLE_MAPS_API_KEY for Google tiles
 npm run dev        # http://localhost:5173 (also serves /api/copilot)
-npm test           # 31 tests: app numbers vs pipeline, tools, agent loop, proxy, grounding check
+npm test           # 42 tests: app numbers vs pipeline, basemap, tools, site screen, agent loop, proxy & cache, grounding check
 npm run build      # static site in dist/ + functions/ for Cloudflare Pages
 ```
 
 Deploy on Cloudflare Pages with build command `npm run build` and output `dist`. The `functions/` folder becomes
 `/api/copilot`. Set `ANTHROPIC_API_KEY` as a secret there (details in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)).
 The map itself is fully static: it reads the precomputed files in `public/data/` (≈6.7 MB; the 1.5 MB core grid paints the map,
-the 3.7 MB terrain detail loads in the background). Measured on a local production build (3 runs): UI ready ≈1.3 s, terrain detail ≈2.3–2.5 s,
-switching daerah ≈50–85 ms. Venue hardware and network will differ.
+the 3.7 MB terrain detail loads in the background) and the 23 MB basemap archive, of which only the tiles in view are fetched
+(HTTP range requests; the first Selangor view took 5 requests, 0.22 MB). Measured on a local production build (3 runs): UI ready
+≈1.3 s, terrain detail ≈2.3–2.4 s. Venue hardware and network will differ.
 
 ## How the numbers are made
 
@@ -113,6 +116,7 @@ Sources for each site are in `public/data/validation.json` and in the app's *Met
 | Land cover | [ESA WorldCover 2021](https://esa-worldcover.org/) v200 | 10 m |
 | Population | DOSM Census 2020 district totals; [Meta/CIESIN HRSL](https://dataforgood.facebook.com/dfg/tools/high-resolution-population-density-maps) v1.5 | HRSL's 30 m pattern scaled per daerah to the census; the nine districts sum to DOSM's published 6,994,423 (`pipeline/dosm_census_2020.json` lists each figure's source) |
 | Facilities & rail | OpenStreetMap and other open sources via Overture Maps places / transportation | Filtered by category, name and confidence; de-duplicated; stations kept only within 300 m of an operational line; may be incomplete |
+| Basemap | OpenStreetMap, ESA WorldCover and other sources via Overture Maps (base, transportation, divisions); Noto Sans glyphs (SIL OFL) from Protomaps basemaps-assets | Self-hosted vector tiles z5–14 |
 
 All retrieved 2026-10-16.
 
@@ -120,7 +124,7 @@ All retrieved 2026-10-16.
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r pipeline/requirements.txt
-PY=.venv/bin/python pipeline/run_all.sh      # ≈5 min, ~1 GB cache in pipeline/.cache
+PY=.venv/bin/python pipeline/run_all.sh      # ≈8 min, ~1.2 GB cache in pipeline/.cache (step 5 needs npm install)
 ```
 
 | Step | Does |
@@ -130,6 +134,7 @@ PY=.venv/bin/python pipeline/run_all.sh      # ≈5 min, ~1 GB cache in pipeline
 | `02_rasters.py` | DEM mosaic, slope, hydrology & HAND, JRC GSW, WorldCover, HRSL → one grid |
 | `03_model.py` | Stage 1 score, scenarios, per-daerah stats, validation, client grid files |
 | `04_facilities.py` | Hospitals, clinics, schools, police, Bomba, rail stations (filtered, de-duplicated) and operational rail lines |
+| `05_basemap.py` + `tiles.mjs` | Google-style basemap: roads, water, land cover, land use, airports, place names → vector tiles → `public/basemap/selangor.pmtiles` |
 
 ## Limitations
 
@@ -146,25 +151,24 @@ PY=.venv/bin/python pipeline/run_all.sh      # ≈5 min, ~1 GB cache in pipeline
 ```
 pipeline/            offline data build (Python)
 public/data/         precomputed files the app reads
-src/data/            types, loading, grid analysis (+ tests), overlays, formatting, Google tiles
-src/copilot/         Claude agent: spec (prompt + tools), browser tools, loop, grounding check; template explainer
-src/components/      map, map chrome, panels, bottom sheet, charts
+public/basemap/      self-hosted vector tiles (PMTiles) and label fonts
+src/data/            types, loading, grid analysis + site screen (+ tests), overlays, formatting, Google tiles
+src/map/             basemap style (Google-like) and runtime icons (+ tests)
+src/copilot/         Claude agent: spec (prompt + tools + prices), browser tools, loop, grounding check; template explainer
+src/components/      map, map chrome, panels, copilot, sites, bottom sheet, charts
 src/services/        PDF brief and GeoJSON export
 server/copilot.ts    Claude API proxy (shared by Cloudflare and the Vite dev server)
 functions/api/       Cloudflare Pages Function entry
-docs/ARCHITECTURE.md end-to-end workflow, AI usage, API setup
+docs/ARCHITECTURE.md architecture, AI usage, API setup
+docs/WORKFLOW_BLUEPRINT.md  every workflow as Input → Process → Output, AI efficiency, demo script
 ```
 
 The earlier upload-an-image flow and its mock analysis data were removed; they remain in git history (commit `0beff74`).
 
 ## Before presenting
 
-These items from the blueprint's status review live in the pitch deck, not the code:
-
-1. **Framing** — the app models riverine (fluvial) flooding; make slide 2 say the same.
-2. **Slide 9** — fill or delete the "[insert model / platform name]" placeholder.
-3. **Slide 9 badge** — 99.62 % is accuracy; F1 is 99.33 %.
-4. **Slide 10 table** — it repeats slide 9's numbers under a different model name; re-run per model or remove it.
-5. **Rain values** — keep 120 / 200 mm/hr labelled as hypothetical stress scenarios (the app does).
-6. **Unsourced figures** (96.5 mm/hr, ±30 %, 14 hotspots, deaths, evacuees, RM6.1bn) — verify each against its source or drop it. The app uses none of them.
-7. **"Sub-second"** — quote the measured figures above instead, or measure on the presentation machine. Copilot answers take longer (several seconds: 2–4 Claude calls per question).
+1. **AI key and budget** — set `ANTHROPIC_API_KEY` as a secret, a monthly spend limit in the Anthropic Console, a rate-limit rule on `/api/copilot`, and (optional) the `COPILOT_CACHE` KV binding so repeated questions are free.
+2. **Rehearse the demo** in [`docs/WORKFLOW_BLUEPRINT.md` §14](docs/WORKFLOW_BLUEPRINT.md#14-five-minute-exhibition-demo) on the presentation machine; the map works offline, the AI needs the network.
+3. **Framing** — say *riverine flood susceptibility*, not forecast; keep 50 / 120 mm/hr labelled as scenario and hypothetical stress test (the app does).
+4. **Timing** — quote measured figures (above) or measure on the venue machine. AI answers take several seconds (2–4 Claude calls per question); repeated questions come back from the cache.
+5. **Unsourced figures** — any statistic on slides that is not in this app (deaths, evacuees, losses, rainfall records) needs its own source.
