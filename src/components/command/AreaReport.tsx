@@ -5,12 +5,22 @@ import type { AreaReport as Report, Ring } from '../../data/analysis';
 import { fmtHa, fmtKm2, fmtPct, fmtPopEstimate, RISK_COLOR, SERIES_COLOR } from '../../data/format';
 import type { Facility, ModelSpec, Scenario } from '../../data/types';
 import { BarList } from '../charts/BarList';
+import { modelName } from '../../copilot/models';
 import { FacilityExposure } from './FacilityExposure';
+import { Markdown } from './Markdown';
 import { WhyScore } from './WhyScore';
 
 export interface DrawnArea { id: number; label: string; rings: Ring[]; report: Report; facilities: Facility[] }
+/** A brief drafted by the AI for one area; its figures were checked against the tool results. */
+export interface AiBrief { text: string; grounded: number; total: number; model: string | null; at: string }
 
 interface Props {
+  /** the Claude agent is available */
+  ai: boolean;
+  brief: AiBrief | null;
+  briefBusy: boolean;
+  onDraftBrief: () => void;
+  onFindSites: () => void;
   area: DrawnArea | null;
   model: ModelSpec;
   scenario: Scenario;
@@ -49,7 +59,7 @@ const ClassStrip: FC<{ high: number; moderate: number; low: number }> = ({ high,
   );
 };
 
-export const AreaReportCard: FC<Props> = ({ area, model, scenario, onDraw, onExportPdf, onExportGeo, onAsk, onRemove, onShowFacility, exporting }) => {
+export const AreaReportCard: FC<Props> = ({ area, model, scenario, onDraw, onExportPdf, onExportGeo, onAsk, onRemove, onShowFacility, exporting, ai, brief, briefBusy, onDraftBrief, onFindSites }) => {
   if (!area) {
     return (
       <section className="card">
@@ -79,6 +89,19 @@ export const AreaReportCard: FC<Props> = ({ area, model, scenario, onDraw, onExp
           </div>
           <button className="btn btn-ghost btn-sm" onClick={onRemove} aria-label="Remove drawn area">✕</button>
         </div>
+        {r.land_km2 > 0 && (
+          <div className="ai-actions">
+            {ai && (
+              <button className="btn btn-ai btn-sm" onClick={onDraftBrief} disabled={briefBusy || !r.detail}
+                title="Claude drafts a short planning brief from this area's computed figures">
+                {briefBusy ? 'Drafting…' : brief ? '✦ Redraft brief' : '✦ Draft brief with AI'}
+              </button>
+            )}
+            <button className="btn btn-secondary btn-sm" onClick={onFindSites} disabled={!r.detail}
+              title="Find contiguous land in this area that stays Low even under Extreme rain">◍ Find candidate sites</button>
+            <button className="btn btn-subtle btn-sm" onClick={onAsk}>Ask about it</button>
+          </div>
+        )}
 
         {r.land_km2 === 0 ? (
           <div className="callout warn">This area has no Selangor land in it{r.federal_km2 > 0 ? ' (federal territories are outside the scope)' : ''}.</div>
@@ -120,6 +143,23 @@ export const AreaReportCard: FC<Props> = ({ area, model, scenario, onDraw, onExp
           </>
         )}
       </section>
+
+      {brief && (
+        <section className="card ai-brief">
+          <div className="card-head">
+            <div>
+              <div className="card-title">✦ AI-drafted brief</div>
+              <div className="card-sub">{modelName(brief.model)} · {brief.at} · included in the PDF</div>
+            </div>
+          </div>
+          <Markdown className="brief-text" text={brief.text} />
+          <div className={`grounding ${brief.grounded === brief.total ? 'ok' : 'warn'}`}>
+            {brief.total === 0 ? 'No figures quoted.'
+              : brief.grounded === brief.total ? `✓ All ${brief.total} figures match the computed results`
+                : `⚠ ${brief.total - brief.grounded} of ${brief.total} figures could not be traced — check before sharing`}
+          </div>
+        </section>
+      )}
 
       {r.land_km2 > 0 && (
         <section className="card">
@@ -170,7 +210,6 @@ export const AreaReportCard: FC<Props> = ({ area, model, scenario, onDraw, onExp
               {exporting ? 'Preparing…' : '⇩ PDF brief'}
             </button>
             <button className="btn btn-secondary btn-sm" onClick={onExportGeo}>⇩ GeoJSON</button>
-            <button className="btn btn-subtle btn-sm" onClick={onAsk}>Ask copilot</button>
           </div>
         </section>
       )}

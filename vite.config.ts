@@ -1,13 +1,14 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { handleCopilot, type CopilotEnv } from './server/copilot'
+import { handleCopilot, memoryCache, type CopilotEnv } from './server/copilot'
 
 // https://vite.dev/config/
 // The app is static (it reads precomputed files from public/data). The only
 // server code is the copilot proxy: a Cloudflare Pages Function in production
 // (functions/api/copilot.ts) and this middleware for `vite dev` / `vite preview`.
 function copilotApi(env: CopilotEnv): Plugin {
+  const cache = memoryCache()
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const chunks: Buffer[] = []
     for await (const c of req) chunks.push(c as Buffer)
@@ -16,7 +17,7 @@ function copilotApi(env: CopilotEnv): Plugin {
     const request = new Request(`http://localhost${req.url ?? '/'}`, {
       method: req.method, headers, body: req.method === 'POST' ? Buffer.concat(chunks) : undefined,
     })
-    const r = await handleCopilot(request, env)
+    const r = await handleCopilot(request, env, { cache })
     res.statusCode = r.status
     r.headers.forEach((v, k) => res.setHeader(k, v))
     res.end(Buffer.from(await r.arrayBuffer()))
@@ -38,6 +39,7 @@ export default defineConfig(({ mode }) => {
       ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
       COPILOT_MODEL: env.COPILOT_MODEL,
       COPILOT_EFFORT: env.COPILOT_EFFORT,
+      COPILOT_ALLOWED_ORIGINS: env.COPILOT_ALLOWED_ORIGINS,
     })],
     server: { port: 5173 },
     // MapLibre's tile worker is an ES module (see MapView.tsx)

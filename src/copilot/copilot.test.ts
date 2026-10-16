@@ -2,11 +2,11 @@
 // browser-side tools over the real data.
 
 import { describe, expect, it } from 'vitest';
-import { analysePolygon, cellIndex, classOf, DAERAH_NAMES, polygonAreaKm2 } from '../data/analysis';
+import { analysePolygon, cellIndex, classOf, DAERAH_NAMES, findCandidateSites, isCandidateCell, polygonAreaKm2, type CandidateSite } from '../data/analysis';
 import { cellsOf, loadBundle } from '../test/realData';
 import { runAgentTurn, type MessageParam } from './agentClient';
 import { TOOLS } from './agentSpec';
-import { runTool, type AgentView, type ToolContext } from './agentTools';
+import { runTool, type AgentView, type ToolContext, type ViewChange } from './agentTools';
 import { checkGrounding, extractFigures } from './grounding';
 
 describe('grounding check', () => {
@@ -80,6 +80,22 @@ describe('agent loop', () => {
     expect(reply.text).toBe('The cell scores 0.5 under Normal.');
     expect(reply.steps.map(s => s.label)).toEqual(['ran query_point', 'ran get_current_view']);
     expect(reply.grounding).toMatchObject({ total: 1, grounded: 1 });
+    expect(reply.usage).toMatchObject({ rounds: 2, cachedRounds: 0 });
+  });
+
+  it('adds up tokens and cost across rounds, and counts shared-cache hits as free', async () => {
+    const replies = [
+      { content: [{ type: 'tool_use', id: 'a', name: 'get_current_view', input: {} }], stop_reason: 'tool_use', model: 'claude-opus-5-5',
+        usage: { input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 9000, cache_creation_input_tokens: 0 } },
+      { content: [{ type: 'text', text: 'Done.' }], stop_reason: 'end_turn', model: 'claude-opus-5-5', cached: true,
+        usage: { input_tokens: 5000, output_tokens: 500 } },
+    ];
+    let n = 0;
+    const fetchImpl = (async () => new Response(JSON.stringify(replies[n++]), { status: 200 })) as unknown as typeof fetch;
+    const { reply } = await runAgentTurn({ history: [], userText: 'q', context: {}, execute: () => ({ step: 's', result: {} }), fetchImpl });
+    expect(reply.usage).toMatchObject({ rounds: 2, cachedRounds: 1, inputTokens: 1000, outputTokens: 100, cacheReadTokens: 9000 });
+    // 1000 × $4 + 100 × $20 + 9000 × $0.20, per million tokens
+    expect(reply.usage.costUsd).toBeCloseTo((1000 * 4 + 100 * 20 + 9000 * 0.2) / 1e6, 9);
   });
 
   it('surfaces server errors', async () => {
@@ -90,13 +106,25 @@ describe('agent loop', () => {
 
 describe('agent tools over the real data', () => {
   const bundle = loadBundle();
-  const view: AgentView = { scenario: 'normal', selectedDaerah: null, activeArea: null, lastCell: null };
+  let view: AgentView = { scenario: 'normal', selectedDaerah: null, activeArea: null, lastCell: null, layers: ['flood_susceptibility'] };
   const shown: string[] = [];
+  const changes: ViewChange[] = [];
+  let siteList: CandidateSite[] = [];
   const ctx: ToolContext = {
     bundle, grid: bundle.grid,
     daerahCells: id => cellsOf(bundle.grid, id),
     getView: () => view,
-    actions: { showArea: (_r, label) => shown.push(label), showPoint: (_a, _b, label) => shown.push(label) },
+    actions: {
+      showArea: (_r, label) => shown.push(label),
+      showPoint: (_a, _b, label) => shown.push(label),
+      setView: c => {
+        changes.push(c);
+        view = { ...view, scenario: c.scenario ?? view.scenario, selectedDaerah: c.daerah === 'all' ? null : c.daerah ?? view.selectedDaerah,
+          layers: [...new Set([...view.layers.filter(l => !c.off.includes(l)), ...c.on])] };
+        return view;
+      },
+      showSites: list => { siteList = list; },
+    },
   };
 
   it('every declared tool has an executor and a strict, closed schema', () => {
@@ -156,5 +184,59 @@ describe('agent tools over the real data', () => {
     expect(r.counts[0].in_high).toBe(expected);
     expect(r.in_high.length).toBe(Math.min(5, expected));
     expect(runTool(ctx, 'list_facilities_at_risk', { kind: 'all', scope: 'active_area', daerah: null, scenario: 'normal', limit: 5 }).isError).toBe(true);
+  });
+
+  it('set_map_view changes the view that later tools read', () => {
+    const out = runTool(ctx, 'set_map_view', { scenario: 'extreme', daerah: 'Klang', layers_on: ['hospitals'], layers_off: [] });
+    expect(out.isError).toBeFalsy();
+    expect(out.result).toMatchObject({ scenario: 'extreme', selected_daerah: 'Klang' });
+    expect((out.result as { visible_layers: string[] }).visible_layers).toContain('hospitals');
+    const now = runTool(ctx, 'get_current_view', {}).result as { scenario: string; selected_daerah: string };
+    expect(now).toMatchObject({ scenario: 'extreme', selected_daerah: 'Klang' });
+    expect(runTool(ctx, 'set_map_view', { scenario: null, daerah: 'Atlantis', layers_on: [], layers_off: [] }).isError).toBe(true);
+    expect(runTool(ctx, 'set_map_view', { scenario: null, daerah: null, layers_on: ['lava'], layers_off: [] }).isError).toBe(true);
+    runTool(ctx, 'set_map_view', { scenario: 'normal', daerah: 'all', layers_on: [], layers_off: ['hospitals'] });
+    expect(view).toMatchObject({ scenario: 'normal', selectedDaerah: null });
+  });
+
+  it('find_candidate_sites returns screened blocks, largest first, and marks them', () => {
+    const out = runTool(ctx, 'find_candidate_sites', { daerah: 'Sepang', min_area_ha: 5, low_under: 'extreme', max_sites: 4, purpose: 'school' });
+    expect(out.isError).toBeFalsy();
+    const r = out.result as { sites: { site: string; area_ha: number; daerah: string }[]; screened_land_ha: number };
+    expect(r.sites.length).toBeGreaterThan(0);
+    expect(r.sites.length).toBeLessThanOrEqual(4);
+    expect(siteList).toHaveLength(r.sites.length);
+    const areas = r.sites.map(x => x.area_ha);
+    expect([...areas].sort((a, b) => b - a)).toEqual(areas);
+    expect(Math.min(...areas)).toBeGreaterThanOrEqual(5);
+    expect(r.sites.every(x => x.daerah === 'Sepang')).toBe(true);
+    expect(r.screened_land_ha).toBeGreaterThanOrEqual(areas.reduce((a, b) => a + b, 0) - 1);
+  });
+});
+
+describe('site screen', () => {
+  const bundle = loadBundle();
+  const extreme = bundle.model.scenarios[2];
+
+  it('every cell of every site passes the screen and sites never touch', () => {
+    const sites = findCandidateSites(bundle.grid, bundle.model, cellsOf(bundle.grid, 9), extreme, 0.05, 8);
+    const seen = new Set<number>();
+    for (const s of sites) {
+      for (const i of s.cells) {
+        expect(isCandidateCell(bundle.grid, bundle.model, i, extreme)).toBe(true);
+        expect(seen.has(i)).toBe(false);
+        seen.add(i);
+      }
+      expect(s.area_km2).toBeGreaterThanOrEqual(0.05);
+      const centre = cellIndex(bundle.grid.meta, s.centre[0], s.centre[1]);
+      expect(Array.from(s.cells)).toContain(centre);
+    }
+  });
+
+  it('a stricter scenario never finds more candidate land', () => {
+    const cells = cellsOf(bundle.grid, 7);
+    const count = (k: number) => Array.from(cells).filter(i => isCandidateCell(bundle.grid, bundle.model, i, bundle.model.scenarios[k])).length;
+    expect(count(2)).toBeLessThanOrEqual(count(1));
+    expect(count(1)).toBeLessThanOrEqual(count(0));
   });
 });

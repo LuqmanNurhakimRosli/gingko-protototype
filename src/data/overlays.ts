@@ -82,6 +82,16 @@ export function safeCanvas(grid: Grid, model: ModelSpec): HTMLCanvasElement {
   });
 }
 
+/** Candidate sites found by the site screen, in a deeper green than the safe-land layer. */
+export function sitesCanvas(grid: Grid, cells: Iterable<number>): HTMLCanvasElement {
+  const on = new Uint8Array(grid.meta.width * grid.meta.height);
+  for (const i of cells) on[i] = 1;
+  return paint(grid, (i, px, o) => {
+    if (!on[i]) return;
+    px[o] = 11; px[o + 1] = 128; px[o + 2] = 67; px[o + 3] = 235;
+  });
+}
+
 export function canvasToUrl(canvas: HTMLCanvasElement): Promise<string> {
   return new Promise((resolve, reject) =>
     canvas.toBlob(b => (b ? resolve(URL.createObjectURL(b)) : reject(new Error('canvas encode failed'))), 'image/png'));

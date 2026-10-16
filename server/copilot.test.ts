@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it } from 'vitest';
 import { SYSTEM_PROMPT, TOOLS } from '../src/copilot/agentSpec';
-import { handleCopilot } from './copilot';
+import { handleCopilot, memoryCache } from './copilot';
 
 type CreateArgs = Anthropic.Beta.MessageCreateParamsNonStreaming;
 
@@ -83,5 +83,30 @@ describe('copilot proxy', () => {
     const r = await handleCopilot(post({ messages: [{ role: 'user', content: 'hi' }] }, { origin: 'https://evil.example' }),
       { ANTHROPIC_API_KEY: 'k', COPILOT_ALLOWED_ORIGINS: 'https://ginkgo.pages.dev' }, { client });
     expect(r.status).toBe(403);
+  });
+
+  it('serves an identical conversation from the shared cache without calling the API', async () => {
+    const { client, calls } = mockClient({ usage: { input_tokens: 900, output_tokens: 40 } as Anthropic.Beta.BetaUsage });
+    const cache = memoryCache();
+    const env = { ANTHROPIC_API_KEY: 'k' };
+    const body = { messages: [{ role: 'user', content: [{ type: 'text', text: 'How was the model checked?' }] }] };
+    const first = await (await handleCopilot(post(body), env, { client, cache })).json();
+    const second = await (await handleCopilot(post(body), env, { client, cache })).json();
+    expect(calls).toHaveLength(1);
+    expect(first.cached).toBe(false);
+    expect(second.cached).toBe(true);
+    expect(second.content).toEqual(first.content);
+    // any change in the history is a miss
+    await handleCopilot(post({ messages: [{ role: 'user', content: [{ type: 'text', text: 'How was it checked?' }] }] }), env, { client, cache });
+    expect(calls).toHaveLength(2);
+  });
+
+  it('does not cache refusals or cut-off answers', async () => {
+    const { client, calls } = mockClient({ stop_reason: 'refusal' });
+    const cache = memoryCache();
+    const body = { messages: [{ role: 'user', content: 'x' }] };
+    await handleCopilot(post(body), { ANTHROPIC_API_KEY: 'k' }, { client, cache });
+    await handleCopilot(post(body), { ANTHROPIC_API_KEY: 'k' }, { client, cache });
+    expect(calls).toHaveLength(2);
   });
 });

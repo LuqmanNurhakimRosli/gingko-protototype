@@ -18,9 +18,13 @@ interface Props {
   facilities: Facility[];
   onSelect: (id: number | null) => void;
   onShowFacility: (f: Facility) => void;
+  aiMode: 'checking' | 'ai' | 'off';
+  /** ask Ginkgo about the selected daerah (name) or about all of Selangor (null) */
+  onAsk: (daerah: string | null) => void;
+  onFindSites: () => void;
 }
 
-export const DaerahPanel: FC<Props> = ({ stats, model, scenario, selected, report, facilities, onSelect, onShowFacility }) => {
+export const DaerahPanel: FC<Props> = ({ stats, model, scenario, selected, report, facilities, onSelect, onShowFacility, aiMode, onAsk, onFindSites }) => {
   const [view, setView] = useState<'chart' | 'table'>('chart');
   const rows = [...stats.daerah].sort((a, b) => b.population - a.population);
   const d = selected ? stats.daerah.find(x => x.id === selected)! : null;
@@ -117,6 +121,13 @@ export const DaerahPanel: FC<Props> = ({ stats, model, scenario, selected, repor
             {report.detail && <> · elevation {report.detail.elev_min}–{fmtInt(report.detail.elev_max)} m · median {report.detail.hand_median.toFixed(1)} m above drainage</>}
           </div>
         )}
+        <div className="ai-actions" style={{ marginTop: 10 }}>
+          <button className={`btn btn-sm ${aiMode === 'ai' ? 'btn-ai' : 'btn-subtle'}`} onClick={() => onAsk(d ? d.name : null)}>
+            ✦ {d ? `Brief me on ${d.name}` : 'Brief me on Selangor'}
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={onFindSites} disabled={!report?.detail}
+            title="Find large blocks of land that stay Low even under Extreme rain">◍ Candidate sites</button>
+        </div>
       </section>
 
       <section className="card">

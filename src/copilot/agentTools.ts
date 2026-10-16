@@ -3,9 +3,10 @@
 // panels use (src/data/analysis.ts); the model only reads these results.
 
 import {
-  analyseCells, CLASS_NAME, classOf, DAERAH_NAMES, FACILITY_KINDS, facilitiesInCells, facilityExposure,
-  queryCell, rasterizePolygon, polygonAreaKm2, type AreaReport, type CellInfo, type Ring,
+  analyseCells, CLASS_NAME, classOf, DAERAH_NAMES, FACILITY_KINDS, facilitiesInCells, facilityExposure, findCandidateSites,
+  isCandidateCell, queryCell, rasterizePolygon, polygonAreaKm2, type AreaReport, type CandidateSite, type CellInfo, type Ring,
 } from '../data/analysis';
+import { MAP_LAYERS, type MapLayerName } from './agentSpec';
 import { searchPlaces } from '../data/places';
 import { CAVEATS, SOURCES } from '../services/exports';
 import type { AppDataBundle, Facility, FacilityKind, Grid, Scenario, ScenarioKey } from '../data/types';
@@ -15,13 +16,21 @@ export interface AgentView {
   selectedDaerah: string | null;
   activeArea: { label: string; rings: Ring[]; report: AreaReport } | null;
   lastCell: CellInfo | null;
+  /** map layers currently visible */
+  layers: MapLayerName[];
 }
+
+export interface ViewChange { scenario: ScenarioKey | null; daerah: string | null; on: MapLayerName[]; off: MapLayerName[] }
 
 export interface AgentActions {
   /** Add an area to the map as a drawn area and open its report. */
   showArea: (rings: Ring[], label: string) => void;
   /** Fly the map to a point and open that cell's details. */
   showPoint: (lat: number, lon: number, label: string) => void;
+  /** Apply a view change and return the view as it now stands. `daerah` "all" clears the selection. */
+  setView: (change: ViewChange) => AgentView;
+  /** Mark candidate sites on the map. */
+  showSites: (sites: CandidateSite[], label: string) => void;
 }
 
 export interface ToolContext {
@@ -279,6 +288,63 @@ function run(ctx: ToolContext, name: string, input: Record<string, unknown>): To
             radius_m: v.radius_m, report: s.report,
           })),
           sources: SOURCES, limitations: CAVEATS,
+        },
+      };
+    }
+    case 'set_map_view': {
+      const scen = input.scenario === null ? null : scenarioOf(ctx, input.scenario).key;
+      const daerah = input.daerah === null || input.daerah === undefined ? null : String(input.daerah);
+      if (daerah !== null && daerah !== 'all') daerahId(daerah);
+      const list = (k: string): MapLayerName[] => {
+        const v = input[k];
+        if (!Array.isArray(v)) throw new ToolInputError(`${k} must be an array`);
+        for (const x of v) if (!(MAP_LAYERS as readonly string[]).includes(x)) throw new ToolInputError(`unknown layer ${x}`);
+        return v as MapLayerName[];
+      };
+      const on = list('layers_on'), off = list('layers_off');
+      const v = ctx.actions.setView({ scenario: scen, daerah, on, off });
+      const what = [scen && `${scen} rain`, daerah && (daerah === 'all' ? 'all Selangor' : daerah), on.length && `+${on.join(', ').replace(/_/g, ' ')}`]
+        .filter(Boolean).join(' · ');
+      return {
+        step: `Set the map${what ? `: ${what}` : ''}`,
+        result: { scenario: v.scenario, selected_daerah: v.selectedDaerah, visible_layers: v.layers },
+      };
+    }
+    case 'find_candidate_sites': {
+      if (!grid.detail) throw new ToolInputError('terrain layers are still loading; try again in a few seconds');
+      const sc = scenarioOf(ctx, input.low_under);
+      const minHa = clamp(num(input, 'min_area_ha'), 1, 500);
+      const max = clamp(Math.round(num(input, 'max_sites')), 1, 8);
+      const purpose = str(input, 'purpose').slice(0, 40) || 'site';
+      const area = ctx.getView().activeArea;
+      let scope: Int32Array, where: string;
+      if (input.daerah !== null && input.daerah !== undefined) {
+        const id = daerahId(input.daerah);
+        scope = ctx.daerahCells(id); where = DAERAH_NAMES[id - 1];
+      } else if (area) {
+        scope = rasterizePolygon(grid.meta, area.rings); where = area.label;
+      } else {
+        scope = ctx.daerahCells(0); where = 'Selangor';
+      }
+      let screened = 0;
+      for (const i of scope) if (isCandidateCell(grid, model, i, sc)) screened++;
+      const sites = findCandidateSites(grid, model, scope, sc, minHa / 100, max);
+      ctx.actions.showSites(sites, purpose);
+      return {
+        step: `Screened ${where} for ${purpose} sites (Low under ${sc.label}, ≥ ${minHa} ha)`,
+        result: {
+          scope: where,
+          criteria: { low_under: sc.key, min_area_ha: minHa, max_slope_deg: 12, max_built_up_pct: 20, excludes: 'water and forest-dominated cells' },
+          screened_land_ha: Math.round(screened * grid.meta.cell_km2 * 100),
+          sites: sites.map(x => ({
+            site: `S${x.rank}`, area_ha: Math.round(x.area_km2 * 1000) / 10,
+            latitude: Math.round(x.centre[1] * 1e4) / 1e4, longitude: Math.round(x.centre[0] * 1e4) / 1e4,
+            daerah: x.daerah, mean_score: r2(x.score_mean), mean_slope_deg: r1(x.slope_mean),
+            median_height_above_drainage_m: r1(x.hand_median), nearest_high_cell_m: x.nearest_high_m,
+          })),
+          note: sites.length
+            ? 'Marked on the map as S1, S2, … Screening only: zoning, land status, access and a site flood study are not checked.'
+            : 'No block of that size passes the screen here. Try a smaller minimum area, a milder scenario, or another daerah.',
         },
       };
     }

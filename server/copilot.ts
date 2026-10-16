@@ -10,6 +10,38 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { DEFAULT_EFFORT, DEFAULT_MODEL, LIMITS, SYSTEM_PROMPT, TOOLS } from '../src/copilot/agentSpec';
 
+/** Shared store of finished API replies, keyed by a hash of the whole request.
+ *  Visitors who tap the same suggestion with the same map view get the stored
+ *  reply instantly and at no API cost; any difference in history misses. */
+export interface ResponseCache {
+  get(key: string): Promise<unknown | null>;
+  put(key: string, value: unknown): Promise<void>;
+}
+
+/** In-process cache for `vite dev` / `vite preview`. */
+export function memoryCache(max = 300): ResponseCache {
+  const m = new Map<string, unknown>();
+  return {
+    async get(key) {
+      const v = m.get(key);
+      if (v === undefined) return null;
+      m.delete(key); m.set(key, v);  // most recently used last
+      return v;
+    },
+    async put(key, value) {
+      m.set(key, value);
+      while (m.size > max) m.delete(m.keys().next().value!);
+    },
+  };
+}
+
+export async function cacheKey(model: string, effort: string, messages: unknown): Promise<string> {
+  // the fixed prompt and tools are part of the key, so editing them never serves stale replies
+  const text = JSON.stringify([model, effort, SYSTEM_PROMPT, TOOLS, messages]);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+}
+
 export interface CopilotEnv {
   ANTHROPIC_API_KEY?: string;
   /** Override the model, e.g. claude-sonnet-5-5 or claude-haiku-5-5 for lower cost. */
@@ -51,7 +83,7 @@ export function validateMessages(raw: unknown): { ok: true; messages: Anthropic.
 export async function handleCopilot(
   request: Request,
   env: CopilotEnv,
-  deps: { client?: Pick<Anthropic, 'beta'> } = {},
+  deps: { client?: Pick<Anthropic, 'beta'>; cache?: ResponseCache } = {},
 ): Promise<Response> {
   const origins = env.COPILOT_ALLOWED_ORIGINS?.split(',').map(s => s.trim()).filter(Boolean);
   const origin = request.headers.get('origin');
@@ -71,10 +103,16 @@ export async function handleCopilot(
   if (!v.ok) return json(400, { error: v.error });
 
   const effort = (EFFORTS as string[]).includes(env.COPILOT_EFFORT ?? '') ? env.COPILOT_EFFORT as Effort : DEFAULT_EFFORT;
+  const model = modelOf(env);
+  const key = deps.cache ? await cacheKey(model, effort, v.messages) : null;
+  if (key) {
+    const hit = await deps.cache!.get(key).catch(() => null);
+    if (hit && typeof hit === 'object') return json(200, { ...hit, cached: true });
+  }
   const client = deps.client ?? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   try {
     const response = await client.beta.messages.create({
-      model: modelOf(env),
+      model,
       max_tokens: 16000,
       betas: BETAS,
       // On a safety decline the API re-runs the turn on Anthropic's recommended fallback model.
@@ -91,14 +129,19 @@ export async function handleCopilot(
     if (response.input_transformations?.length) {
       console.warn('copilot: input_transformations', JSON.stringify(response.input_transformations));
     }
-    return json(200, {
+    const payload = {
       id: response.id,
       model: response.model,
       content: response.content,
       stop_reason: response.stop_reason,
       stop_details: response.stop_details ?? null,
       usage: response.usage,
-    });
+    };
+    // only complete, ordinary turns are worth replaying
+    if (key && (response.stop_reason === 'end_turn' || response.stop_reason === 'tool_use')) {
+      await deps.cache!.put(key, payload).catch(() => {});
+    }
+    return json(200, { ...payload, cached: false });
   } catch (err) {
     if (err instanceof Anthropic.RateLimitError) return json(429, { error: 'The AI service is busy — try again in a moment.' });
     if (err instanceof Anthropic.AuthenticationError) return json(502, { error: 'The AI service rejected the server API key.' });

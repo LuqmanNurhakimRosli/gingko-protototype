@@ -5,7 +5,7 @@
 // the API are stored and sent back exactly as received.
 
 import type Anthropic from '@anthropic-ai/sdk';
-import { MAX_TOOL_ROUNDS } from './agentSpec';
+import { MAX_TOOL_ROUNDS, PRICES } from './agentSpec';
 import type { ToolOutcome } from './agentTools';
 import { checkGrounding, type GroundingResult } from './grounding';
 
@@ -13,6 +13,21 @@ export type MessageParam = Anthropic.Beta.BetaMessageParam;
 type ContentBlock = Anthropic.Beta.BetaContentBlock;
 
 export interface AgentStep { id: string; label: string; ok: boolean }
+
+/** What one answer cost: tokens summed over its API rounds. Rounds served from
+ *  the shared reply cache cost nothing and are counted separately. */
+export interface TurnUsage {
+  rounds: number;
+  cachedRounds: number;
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+  /** US$ estimate from list prices; null for an unknown model */
+  costUsd: number | null;
+  ms: number;
+}
+
 export interface AgentReply {
   text: string;
   steps: AgentStep[];
@@ -20,6 +35,15 @@ export interface AgentReply {
   stopReason: string;
   model: string | null;
   notice?: string;
+  usage: TurnUsage;
+}
+
+interface ApiUsage { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null }
+
+export function costOf(model: string | null, u: Pick<TurnUsage, 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens'>): number | null {
+  const p = PRICES[(model ?? '').replace(/-\d{8}$/, '')];
+  if (!p) return null;
+  return (u.inputTokens * p.input + u.outputTokens * p.output + u.cacheReadTokens * p.cacheRead + u.cacheWriteTokens * p.cacheWrite) / 1e6;
 }
 
 export interface AgentStatus { enabled: boolean; model: string | null }
@@ -37,7 +61,7 @@ export async function fetchAgentStatus(fetchImpl: typeof fetch = fetch): Promise
   }
 }
 
-interface ApiResponse { content: ContentBlock[]; stop_reason: string | null; model?: string; error?: string }
+interface ApiResponse { content: ContentBlock[]; stop_reason: string | null; model?: string; error?: string; usage?: ApiUsage; cached?: boolean }
 
 /** Every number the tools have returned so far in this conversation. */
 function toolResultSources(history: MessageParam[]): unknown[] {
@@ -74,6 +98,9 @@ export async function runAgentTurn(opts: {
   }];
   const steps: AgentStep[] = [];
   let model: string | null = null;
+  const t0 = Date.now();
+  const usage: TurnUsage = { rounds: 0, cachedRounds: 0, inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, costUsd: 0, ms: 0 };
+  const finish = () => ({ ...usage, costUsd: costOf(model, usage), ms: Date.now() - t0 });
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     const res = await doFetch(COPILOT_ENDPOINT, {
@@ -85,6 +112,14 @@ export async function runAgentTurn(opts: {
     const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as ApiResponse;
     if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`);
     model = data.model ?? model;
+    usage.rounds++;
+    if (data.cached) usage.cachedRounds++;
+    else if (data.usage) {
+      usage.inputTokens += data.usage.input_tokens ?? 0;
+      usage.outputTokens += data.usage.output_tokens ?? 0;
+      usage.cacheReadTokens += data.usage.cache_read_input_tokens ?? 0;
+      usage.cacheWriteTokens += data.usage.cache_creation_input_tokens ?? 0;
+    }
     history.push({ role: 'assistant', content: data.content });
 
     if (data.stop_reason === 'tool_use') {
@@ -106,11 +141,11 @@ export async function runAgentTurn(opts: {
     const sources = [...toolResultSources(history), opts.context, ...(opts.extraSources ?? [])];
     if (data.stop_reason === 'refusal') {
       const t = 'I can’t help with that request. Ask me about flood susceptibility, places, facilities or scenarios in Selangor.';
-      return { history, reply: { text: t, steps, grounding: checkGrounding(t, sources), stopReason: 'refusal', model } };
+      return { history, reply: { text: t, steps, grounding: checkGrounding(t, sources), stopReason: 'refusal', model, usage: finish() } };
     }
     const notice = data.stop_reason === 'max_tokens' ? 'The answer was cut off at the length limit.' : undefined;
-    return { history, reply: { text: text || '(no answer)', steps, grounding: checkGrounding(text, sources), stopReason: data.stop_reason ?? 'end_turn', model, notice } };
+    return { history, reply: { text: text || '(no answer)', steps, grounding: checkGrounding(text, sources), stopReason: data.stop_reason ?? 'end_turn', model, notice, usage: finish() } };
   }
   const t = `I stopped after ${MAX_TOOL_ROUNDS} rounds of tool calls without finishing. Try a narrower question.`;
-  return { history, reply: { text: t, steps, grounding: checkGrounding(t, [MAX_TOOL_ROUNDS]), stopReason: "tool_limit", model } };
+  return { history, reply: { text: t, steps, grounding: checkGrounding(t, [MAX_TOOL_ROUNDS]), stopReason: 'tool_limit', model, usage: finish() } };
 }

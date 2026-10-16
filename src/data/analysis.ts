@@ -374,13 +374,104 @@ export function facilityExposure(items: Facility[], sc: Scenario): FacilityExpos
   });
 }
 
-/** Low susceptibility (Normal), gentle, undeveloped, not water, not forest-dominated —
- *  the same screen as AreaDetail.candidate_km2. Needs terrain detail. */
-export function isCandidateCell(grid: Grid, model: ModelSpec, i: number): boolean {
+/** Low susceptibility (Normal by default), gentle, undeveloped, not water, not
+ *  forest-dominated — the same screen as AreaDetail.candidate_km2. Needs terrain detail. */
+export function isCandidateCell(grid: Grid, model: ModelSpec, i: number, lowUnder: Scenario = model.scenarios[0]): boolean {
   const d = grid.detail;
   if (!d) return false;
   const dz = grid.daerah[i];
   if (dz < 1 || dz > 9) return false;
-  return classOf(grid.score[i], model.scenarios[0]) === 1 && d.slope[i] / 4 < 12 && grid.built[i] < 20
+  return classOf(grid.score[i], lowUnder) === 1 && d.slope[i] / 4 < 12 && grid.built[i] < 20
     && d.water[i] < 20 && d.tree[i] < 50;
+}
+
+export interface CandidateSite {
+  /** 1-based rank (largest first) */
+  rank: number;
+  cells: Int32Array;
+  area_km2: number;
+  /** a cell of the site near its middle (always inside the site) */
+  centre: LonLat;
+  daerah: string | null;
+  score_mean: number;
+  slope_mean: number;
+  hand_median: number;
+  /** distance from the centre to the nearest High cell under the screening scenario; null if none within ~5.5 km */
+  nearest_high_m: number | null;
+}
+
+/** Contiguous blocks of screened candidate land inside `scope`, largest first.
+ *  A block must stay Low under `lowUnder` (pick Extreme for a robust screen) and
+ *  be at least `minKm2`. Same screen as isCandidateCell; 8-connected. */
+export function findCandidateSites(grid: Grid, model: ModelSpec, scope: Int32Array, lowUnder: Scenario, minKm2: number, max: number): CandidateSite[] {
+  const d = grid.detail;
+  if (!d) return [];
+  const { width, height, cell_km2, cell_m } = grid.meta;
+  const mask = new Uint8Array(width * height);
+  for (const i of scope) if (isCandidateCell(grid, model, i, lowUnder)) mask[i] = 1;
+  const minCells = Math.max(1, Math.ceil(minKm2 / cell_km2));
+  const comps: number[][] = [];
+  const queue = new Int32Array(scope.length || 1);
+  for (const start of scope) {
+    if (mask[start] !== 1) continue;
+    let head = 0, tail = 0;
+    queue[tail++] = start;
+    mask[start] = 2;
+    const comp: number[] = [];
+    while (head < tail) {
+      const i = queue[head++];
+      comp.push(i);
+      const r = Math.floor(i / width), c = i % width;
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        if (!dr && !dc) continue;
+        const rr = r + dr, cc = c + dc;
+        if (rr < 0 || cc < 0 || rr >= height || cc >= width) continue;
+        const j = rr * width + cc;
+        if (mask[j] === 1) { mask[j] = 2; queue[tail++] = j; }
+      }
+    }
+    if (comp.length >= minCells) comps.push(comp);
+  }
+  comps.sort((a, b) => b.length - a.length);
+  const highStep = Math.round(lowUnder.high * 200);
+  return comps.slice(0, max).map((comp, k) => {
+    let sr = 0, sc = 0, score = 0, slope = 0;
+    const hand = new Float32Array(comp.length);
+    comp.forEach((i, n) => {
+      sr += Math.floor(i / width); sc += i % width;
+      score += grid.score[i] / 200; slope += d.slope[i] / 4; hand[n] = d.hand[i] / 10;
+    });
+    const mr = sr / comp.length, mc = sc / comp.length;
+    let centre = comp[0], best = Infinity;
+    for (const i of comp) {
+      const dd = (Math.floor(i / width) - mr) ** 2 + (i % width - mc) ** 2;
+      if (dd < best) { best = dd; centre = i; }
+    }
+    // nearest High cell from the centre, searching outward ring by ring
+    const cr = Math.floor(centre / width), cc = centre % width;
+    let nearest: number | null = null;
+    for (let rad = 1; rad <= 60 && nearest === null; rad++) {
+      for (let dr = -rad; dr <= rad; dr++) for (let dc = -rad; dc <= rad; dc++) {
+        if (Math.max(Math.abs(dr), Math.abs(dc)) !== rad) continue;
+        const rr = cr + dr, c2 = cc + dc;
+        if (rr < 0 || c2 < 0 || rr >= height || c2 >= width) continue;
+        const j = rr * width + c2, s = grid.score[j];
+        if (s === SCORE_OUTSIDE || s === SCORE_WATER || s < highStep) continue;
+        const m = Math.hypot(dr * cell_m[1], dc * cell_m[0]);
+        if (nearest === null || m < nearest) nearest = m;
+      }
+    }
+    const dz = grid.daerah[centre];
+    return {
+      rank: k + 1,
+      cells: Int32Array.from(comp),
+      area_km2: comp.length * cell_km2,
+      centre: cellCenter(grid.meta, centre),
+      daerah: dz >= 1 && dz <= 9 ? DAERAH_NAMES[dz - 1] : null,
+      score_mean: score / comp.length,
+      slope_mean: slope / comp.length,
+      hand_median: median(hand),
+      nearest_high_m: nearest === null ? null : Math.round(nearest / 10) * 10,
+    };
+  });
 }

@@ -25,6 +25,10 @@ interface Props {
   onClearArea: () => void;
   onPick: (p: Place) => void;
   onAsk: () => void;
+  /** a question typed in the search box */
+  onAskText: (q: string) => void;
+  aiMode: 'checking' | 'ai' | 'off';
+  aiBusy: boolean;
   onLocate: () => void;
   locating: boolean;
   onReset: () => void;
@@ -74,9 +78,10 @@ export const MapChrome: FC<Props> = (p) => {
         <PlaceSearch
           places={p.places}
           onPick={p.onPick}
-          placeholder="Search Selangor"
+          onAsk={p.onAskText}
+          placeholder={p.aiMode === 'ai' ? 'Search a place or ask Ginkgo' : 'Search Selangor'}
           leading={<span className="gm-brand" aria-hidden>G</span>}
-          trailing={<button className="gm-ask-btn" onClick={p.onAsk} aria-label="Ask Ginkgo">✦</button>}
+          trailing={<button className={`gm-ask-btn${p.aiBusy ? ' busy' : ''}`} onClick={p.onAsk} aria-label="Ask Ginkgo" title="Ask Ginkgo">✦</button>}
         />
         <div className="gm-chips" role="toolbar" aria-label="Quick layers">
           <button className="gm-chip ask" onClick={p.onAsk}><span aria-hidden>✦</span> Ask Ginkgo</button>

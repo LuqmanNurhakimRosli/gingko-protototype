@@ -14,10 +14,10 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { Protocol } from 'pmtiles';
 import type { Feature, FeatureCollection, Point } from 'geojson';
-import { classOf, CLASS_NAME, queryCell, type CellInfo, type Ring } from '../../data/analysis';
-import { fmtCoord, fmtInt, RISK_COLOR, RIVER_COLOR } from '../../data/format';
+import { classOf, CLASS_NAME, queryCell, type CandidateSite, type CellInfo, type Ring } from '../../data/analysis';
+import { fmtCoord, fmtHa, fmtInt, RISK_COLOR, RIVER_COLOR } from '../../data/format';
 import { googleCopyright, googleSession, googleTileUrl, type GoogleMapType } from '../../data/googleTiles';
-import { builtCanvas, canvasToUrl, classCanvas, gridCorners, historyCanvas, safeCanvas } from '../../data/overlays';
+import { builtCanvas, canvasToUrl, classCanvas, gridCorners, historyCanvas, safeCanvas, sitesCanvas } from '../../data/overlays';
 import type { AppDataBundle, FacilityKind, Grid, RiskClass, Scenario } from '../../data/types';
 import { makeIcon } from '../../map/icons';
 import { BASE_GROUP, basemapStyle, bundledUrls, SLOT_MARKERS, SLOT_RASTER, SLOT_VECTOR, type BaseVariant } from '../../map/style';
@@ -43,6 +43,8 @@ export interface LayerState {
 export interface MapFocus { bounds: [[number, number], [number, number]]; label: string; point: [number, number]; token: number }
 export interface MapInspect { lat: number; lon: number; title?: string; me?: boolean; token: number }
 export interface MapPadding { top: number; bottom: number; left: number; right: number }
+/** Candidate sites from the site screen (AI or manual), shown as numbered pins. */
+export interface SiteSet { list: CandidateSite[]; label: string; lowUnder: string; token: number }
 
 interface Props {
   bundle: AppDataBundle;
@@ -57,6 +59,7 @@ interface Props {
   focus: MapFocus | null;
   inspect: MapInspect | null;
   resetToken: number;
+  sites: SiteSet | null;
   /** room taken by floating chrome, so fitted views are not hidden under it */
   padding: MapPadding;
   onSelectDaerah: (id: number | null) => void;
@@ -76,7 +79,7 @@ const LAYER_KINDS: Record<'hospital' | 'clinic' | 'school' | 'emergency', Facili
 const DRAW_COLOR = '#1A73E8';
 const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
-const RASTERS = ['built', 'risk', 'history', 'safe'] as const;
+const RASTERS = ['built', 'risk', 'history', 'safe', 'cand'] as const;
 type RasterId = typeof RASTERS[number];
 const INTERACTIVE = ['fac-icons', 'fac-stations', 'sites-circle', 'rail-line', 'daerah-fill'];
 
@@ -223,6 +226,7 @@ function addAppLayers(m: MLMap, bundle: AppDataBundle) {
     risk: ['interpolate', ['linear'], ['zoom'], 7, 0.62, 11, 0.5, 14, 0.42, 17, 0.36],
     history: 0.8,
     safe: 0.7,
+    cand: 0.9,
   };
   for (const id of RASTERS) {
     m.addSource(id, { type: 'image', url: BLANK_PNG, coordinates: corners });
@@ -322,7 +326,7 @@ const setVis = (m: MLMap, id: string, on: boolean) => {
 };
 
 export const MapView: FC<Props> = (props) => {
-  const { bundle, grid, scenario, layers, basemap, selectedDaerah, drawn, drawMode, focus, inspect, resetToken } = props;
+  const { bundle, grid, scenario, layers, basemap, selectedDaerah, drawn, drawMode, focus, inspect, resetToken, sites } = props;
   const box = useRef<HTMLDivElement>(null);
   const tip = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
@@ -336,13 +340,14 @@ export const MapView: FC<Props> = (props) => {
     painted: Partial<Record<RasterId, string>>;
     popup?: Popup;
     pin?: Marker;
+    sitePins: Marker[];
     hover?: number | null;
     googleAttr?: HTMLElement;
     selangor?: LngLatBounds;
     /** a rectangle drag ends with a click event; ignore clicks until this time */
     quietUntil?: number;
     onReady: (() => void)[];
-  }>({ urls: {}, painted: {}, onReady: [] });
+  }>({ urls: {}, painted: {}, onReady: [], sitePins: [] });
 
   /** Run now if the style and app layers are ready, else once they are. */
   const whenReady = (fn: () => void) => {
@@ -655,6 +660,32 @@ export const MapView: FC<Props> = (props) => {
     m.flyTo({ center: [inspect.lon, inspect.lat], zoom: Math.max(m.getZoom(), 14), offset: centerOffset(cb.current.padding), duration: 700 });
     m.once('moveend', () => openRef.current(inspect.lon, inspect.lat, inspect.title));
   }, [inspect]);
+
+  // ── candidate sites: green blocks + numbered pins ─────────────────────
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    r.current.sitePins.forEach(p => p.remove());
+    r.current.sitePins = [];
+    const list = sites?.list ?? [];
+    const cells = list.flatMap(x => Array.from(x.cells));
+    showRaster('cand', list.length > 0, list.length ? `c${sites!.token}` : null, () => sitesCanvas(bundle.grid, cells));
+    if (!list.length) return;
+    for (const x of list) {
+      const e = el('button', 'site-pin');
+      e.type = 'button';
+      e.append(el('b', undefined, `S${x.rank}`), el('span', undefined, fmtHa(x.area_km2)));
+      e.title = `${sites!.label} candidate S${x.rank} · ${fmtHa(x.area_km2)}`;
+      e.addEventListener('click', ev => {
+        ev.stopPropagation();
+        openRef.current(x.centre[0], x.centre[1], `Candidate S${x.rank} · ${fmtHa(x.area_km2)}`);
+      });
+      r.current.sitePins.push(new Marker({ element: e, anchor: 'center' }).setLngLat(x.centre).addTo(m));
+    }
+    const b = new LngLatBounds();
+    list.forEach(x => b.extend(x.centre));
+    m.fitBounds(b, { padding: pad(cb.current.padding, 70), maxZoom: 14, duration: 700 });
+  }, [bundle, sites]);
 
   // ── drawn polygon ──────────────────────────────────────────────────────
   useEffect(() => {

@@ -4,6 +4,7 @@
 import type { AreaReport, Ring } from '../data/analysis';
 import { classOf } from '../data/analysis';
 import { fmtHa, fmtKm2, fmtPct, fmtPopEstimate, RISK_RGB } from '../data/format';
+import { modelName } from '../copilot/models';
 import type { Grid, ModelSpec, Scenario, ValidationFile } from '../data/types';
 
 export const SOURCES = [
@@ -124,9 +125,11 @@ function miniMap(grid: Grid, rings: Ring[], sc: Scenario, px = 520): HTMLCanvasE
 export async function downloadBrief(opts: {
   grid: Grid; rings: Ring[]; report: AreaReport; model: ModelSpec; scenario: Scenario;
   validation: ValidationFile; label: string;
+  /** optional AI-drafted summary, printed with its figure check */
+  aiBrief?: { text: string; grounded: number; total: number; model: string | null } | null;
 }): Promise<void> {
   const { jsPDF } = await import('jspdf');
-  const { grid, rings, report, model, scenario, validation, label } = opts;
+  const { grid, rings, report, model, scenario, validation, label, aiBrief } = opts;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
   const M = 14;
@@ -220,6 +223,23 @@ export async function downloadBrief(opts: {
   const floods = validation.sites.filter(v => v.kind === 'reported_flood' && !v.outside_scope);
   const ctrls = validation.sites.filter(v => v.kind === 'hilly_control');
   ink(); para(`${floods.filter(v => v.pass).length} of ${floods.length} places reported flooded in Dec 2021 score High at the point (Normal scenario); ${ctrls.filter(v => v.pass).length} of ${ctrls.length} DEM-selected hilly controls score Low. A sanity check, not an accuracy measure.`);
+
+  if (aiBrief) {
+    h2('6. AI-drafted summary');
+    muted();
+    para(`Drafted by ${modelName(aiBrief.model)} from this area's computed results. ${aiBrief.total
+      ? `${aiBrief.grounded} of ${aiBrief.total} figures were traced to the computed results by the app's check.`
+      : 'It quotes no figures.'} Review before sharing.`);
+    ink();
+    for (const block of aiBrief.text.split(/\n+/)) {
+      const line = block.replace(/\*\*(.+?)\*\*/g, '$1').trim();
+      if (!line) continue;
+      if (/^#+\s+/.test(line)) {
+        doc.setFont('helvetica', 'bold'); para(line.replace(/^#+\s+/, '')); doc.setFont('helvetica', 'normal');
+      } else para(line.replace(/^\s*[-*•]\s+/, '• '));
+      if (y > 280) { doc.addPage(); y = 18; }
+    }
+  }
 
   h2('Limitations');
   muted(); CAVEATS.forEach(c => para(`• ${c}`));
