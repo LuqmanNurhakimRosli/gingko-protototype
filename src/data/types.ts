@@ -148,6 +148,30 @@ export interface GridDetail {
   river_dist: Uint16Array; // m
 }
 
+export type FacilityKind = 'hospital' | 'clinic' | 'school' | 'police' | 'fire' | 'station';
+
+/** A mapped facility; `s` is the score byte of the grid cell it sits in. */
+export interface Facility {
+  k: FacilityKind;
+  n: string;
+  c: [number, number];
+  d: number;
+  s: number;
+}
+
+export interface FacilitiesFile {
+  source: string;
+  retrieved: string;
+  note: string;
+  kinds: Record<FacilityKind, string>;
+  items: Facility[];
+}
+
+export interface RailFile extends FeatureCollection {
+  lines: Record<string, { name: string; color: string }>;
+  source: string;
+}
+
 export interface AppDataBundle {
   grid: Grid;
   stats: StatsFile;
@@ -156,6 +180,8 @@ export interface AppDataBundle {
   daerah: FeatureCollection;
   rivers: FeatureCollection;
   places: Place[];
+  facilities: FacilitiesFile;
+  rail: RailFile;
 }
 
 export const SCORE_WATER = 254;

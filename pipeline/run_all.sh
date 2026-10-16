@@ -10,3 +10,4 @@ export GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR GDAL_HTTP_MAX_RETRY=5 GDAL_HTTP_RE
 "$PY" 01b_sites.py
 "$PY" 02_rasters.py
 "$PY" 03_model.py
+"$PY" 04_facilities.py

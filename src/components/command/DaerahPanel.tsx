@@ -4,8 +4,9 @@
 import { useState, type FC } from 'react';
 import type { AreaReport } from '../../data/analysis';
 import { fmtCompact, fmtInt, fmtKm2, fmtPct, fmtPopEstimate, RISK_COLOR, SERIES_COLOR } from '../../data/format';
-import type { ModelSpec, Scenario, StatsFile } from '../../data/types';
+import type { Facility, ModelSpec, Scenario, StatsFile } from '../../data/types';
 import { BarList } from '../charts/BarList';
+import { FacilityExposure } from './FacilityExposure';
 import { WhyScore } from './WhyScore';
 
 interface Props {
@@ -14,10 +15,12 @@ interface Props {
   scenario: Scenario;
   selected: number | null;
   report: AreaReport | null;
+  facilities: Facility[];
   onSelect: (id: number | null) => void;
+  onShowFacility: (f: Facility) => void;
 }
 
-export const DaerahPanel: FC<Props> = ({ stats, model, scenario, selected, report, onSelect }) => {
+export const DaerahPanel: FC<Props> = ({ stats, model, scenario, selected, report, facilities, onSelect, onShowFacility }) => {
   const [view, setView] = useState<'chart' | 'table'>('chart');
   const rows = [...stats.daerah].sort((a, b) => b.population - a.population);
   const d = selected ? stats.daerah.find(x => x.id === selected)! : null;
@@ -114,6 +117,16 @@ export const DaerahPanel: FC<Props> = ({ stats, model, scenario, selected, repor
             {report.detail && <> · elevation {report.detail.elev_min}–{fmtInt(report.detail.elev_max)} m · median {report.detail.hand_median.toFixed(1)} m above drainage</>}
           </div>
         )}
+      </section>
+
+      <section className="card">
+        <div className="card-head">
+          <div>
+            <div className="card-title">Critical facilities</div>
+            <div className="card-sub">{d ? d.name : 'Selangor'} · mapped facilities by flood class</div>
+          </div>
+        </div>
+        <FacilityExposure items={facilities} scenario={scenario} onShow={onShowFacility} />
       </section>
 
       <section className="card">

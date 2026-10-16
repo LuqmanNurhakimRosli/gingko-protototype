@@ -3,11 +3,12 @@
 import type { FC } from 'react';
 import type { AreaReport as Report, Ring } from '../../data/analysis';
 import { fmtHa, fmtKm2, fmtPct, fmtPopEstimate, RISK_COLOR, SERIES_COLOR } from '../../data/format';
-import type { ModelSpec, Scenario } from '../../data/types';
+import type { Facility, ModelSpec, Scenario } from '../../data/types';
 import { BarList } from '../charts/BarList';
+import { FacilityExposure } from './FacilityExposure';
 import { WhyScore } from './WhyScore';
 
-export interface DrawnArea { id: number; label: string; rings: Ring[]; report: Report }
+export interface DrawnArea { id: number; label: string; rings: Ring[]; report: Report; facilities: Facility[] }
 
 interface Props {
   area: DrawnArea | null;
@@ -18,6 +19,7 @@ interface Props {
   onExportGeo: () => void;
   onAsk: () => void;
   onRemove: () => void;
+  onShowFacility: (f: Facility) => void;
   exporting: boolean;
 }
 
@@ -47,7 +49,7 @@ const ClassStrip: FC<{ high: number; moderate: number; low: number }> = ({ high,
   );
 };
 
-export const AreaReportCard: FC<Props> = ({ area, model, scenario, onDraw, onExportPdf, onExportGeo, onAsk, onRemove, exporting }) => {
+export const AreaReportCard: FC<Props> = ({ area, model, scenario, onDraw, onExportPdf, onExportGeo, onAsk, onRemove, onShowFacility, exporting }) => {
   if (!area) {
     return (
       <section className="card">
@@ -149,6 +151,13 @@ export const AreaReportCard: FC<Props> = ({ area, model, scenario, onDraw, onExp
               </div>
             </>
           )}
+        </section>
+      )}
+
+      {r.land_km2 > 0 && (
+        <section className="card">
+          <div className="card-title" style={{ marginBottom: 8 }}>Critical facilities inside</div>
+          <FacilityExposure items={area.facilities} scenario={scenario} onShow={onShowFacility} />
         </section>
       )}
 

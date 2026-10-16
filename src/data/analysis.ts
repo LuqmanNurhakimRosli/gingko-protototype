@@ -3,7 +3,7 @@
 // susceptibility score: scores come from the pipeline; this only counts cells.
 
 import type {
-  Grid, GridDetail, GridMeta, ModelSpec, RiskClass, Scenario, ScenarioKey,
+  Facility, FacilityKind, Grid, GridDetail, GridMeta, ModelSpec, RiskClass, Scenario, ScenarioKey,
 } from './types';
 import { FEDERAL_TERRITORY, SCORE_OUTSIDE, SCORE_WATER } from './types';
 
@@ -241,7 +241,6 @@ export function analyseCells(grid: Grid, model: ModelSpec, cells: Int32Array, po
     let elevMin = Infinity, elevMax = -Infinity, k2 = 0;
     let slope = 0, cand = 0;
     const tsum = { hand: 0, prox: 0, flat: 0, elev: 0, hist: 0 };
-    const low = model.scenarios[0];
     for (const p of landCells) {
       const e = d.elev[p], hm = d.hand[p] / 10, rd = d.river_dist[p], sl = d.slope[p] / 4;
       elev[k2] = e; hand[k2] = hm; dist[k2] = rd; k2++;
@@ -251,7 +250,7 @@ export function analyseCells(grid: Grid, model: ModelSpec, cells: Int32Array, po
       const tv = termValues(model, { hand_m: hm, river_m: rd, slope_deg: sl, elev_m: e, hist_share: grid.hist[p] / 100 });
       tsum.hand += tv.hand; tsum.prox += tv.prox; tsum.flat += tv.flat; tsum.elev += tv.elev; tsum.hist += tv.hist;
       // screening only: Low class, gentle slope, not built, not water, not forest-dominated
-      if (classOf(grid.score[p], low) === 1 && sl < 12 && grid.built[p] < 20 && d.water[p] < 20 && d.tree[p] < 50) cand++;
+      if (isCandidateCell(grid, model, p)) cand++;
     }
     const handMed = median(hand), distMed = median(dist), elevMed = median(elev);
     const inputs: Record<string, string> = {
@@ -341,4 +340,47 @@ export function queryCell(grid: Grid, model: ModelSpec, lon: number, lat: number
     info.terms = termValues(model, { hand_m: info.hand, river_m: info.river_m, slope_deg: info.slope, elev_m: info.elev, hist_share: info.hist / 100 });
   }
   return info;
+}
+
+// ── facilities ────────────────────────────────────────────────────────────
+export const FACILITY_KINDS: FacilityKind[] = ['hospital', 'clinic', 'school', 'police', 'fire', 'station'];
+
+export interface FacilityExposure {
+  kind: FacilityKind;
+  total: number;
+  high: number;
+  moderate: number;
+  /** names of facilities in High cells, alphabetical, for display */
+  highNames: string[];
+}
+
+/** Facilities whose grid cell is one of `cells` (e.g. a drawn polygon). */
+export function facilitiesInCells(meta: GridMeta, items: Facility[], cells: Int32Array): Facility[] {
+  const set = new Set<number>(cells);
+  return items.filter(f => set.has(cellIndex(meta, f.c[0], f.c[1])));
+}
+
+export function facilityExposure(items: Facility[], sc: Scenario): FacilityExposure[] {
+  return FACILITY_KINDS.map(kind => {
+    const of = items.filter(f => f.k === kind);
+    const high = of.filter(f => classOf(f.s, sc) === 3);
+    return {
+      kind,
+      total: of.length,
+      high: high.length,
+      moderate: of.filter(f => classOf(f.s, sc) === 2).length,
+      highNames: high.map(f => f.n).sort((a, b) => a.localeCompare(b)),
+    };
+  });
+}
+
+/** Low susceptibility (Normal), gentle, undeveloped, not water, not forest-dominated —
+ *  the same screen as AreaDetail.candidate_km2. Needs terrain detail. */
+export function isCandidateCell(grid: Grid, model: ModelSpec, i: number): boolean {
+  const d = grid.detail;
+  if (!d) return false;
+  const dz = grid.daerah[i];
+  if (dz < 1 || dz > 9) return false;
+  return classOf(grid.score[i], model.scenarios[0]) === 1 && d.slope[i] / 4 < 12 && grid.built[i] < 20
+    && d.water[i] < 20 && d.tree[i] < 50;
 }

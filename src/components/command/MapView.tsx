@@ -1,4 +1,4 @@
-// Ginkgo Command Center — centre map (Leaflet + OpenStreetMap).
+// Ginkgo Command Center — centre map (Leaflet).
 // Shows precomputed layers, lets the user pick a daerah, inspect a cell, and
 // draw a rectangle or polygon. All numbers shown come from the grid.
 
@@ -6,13 +6,14 @@ import { useEffect, useLayoutEffect, useRef, type FC } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Feature } from 'geojson';
-import { CLASS_NAME, queryCell, type CellInfo, type Ring } from '../../data/analysis';
-import { fmtCoord, fmtInt, RISK_COLOR, RIVER_COLOR } from '../../data/format';
-import { builtCanvas, canvasToUrl, classCanvas, gridBounds, historyCanvas } from '../../data/overlays';
-import type { AppDataBundle, Grid, RiskClass, Scenario } from '../../data/types';
+import { classOf, CLASS_NAME, queryCell, type CellInfo, type Ring } from '../../data/analysis';
+import { fmtCoord, fmtInt, RAIL_NEUTRAL, RISK_COLOR, RIVER_COLOR } from '../../data/format';
+import { googleCopyright, googleSession, googleTileUrl, type GoogleMapType } from '../../data/googleTiles';
+import { builtCanvas, canvasToUrl, classCanvas, gridBounds, historyCanvas, safeCanvas } from '../../data/overlays';
+import type { AppDataBundle, Facility, FacilityKind, Grid, RiskClass, Scenario } from '../../data/types';
 
 export type DrawMode = 'none' | 'rect' | 'poly';
-export type Basemap = 'osm' | 'light' | 'none';
+export type Basemap = 'streets' | 'light' | 'osm' | 'google' | 'google-sat' | 'none';
 export interface LayerState {
   susceptibility: boolean;
   showLow: boolean;
@@ -21,8 +22,15 @@ export interface LayerState {
   rivers: boolean;
   boundaries: boolean;
   built: boolean;
+  safe: boolean;
+  rail: boolean;
+  hospital: boolean;
+  clinic: boolean;
+  school: boolean;
+  emergency: boolean;
 }
 export interface MapFocus { bounds: [[number, number], [number, number]]; label: string; point: [number, number]; token: number }
+export interface MapInspect { lat: number; lon: number; title?: string; token: number }
 
 interface Props {
   bundle: AppDataBundle;
@@ -35,24 +43,39 @@ interface Props {
   drawn: Ring[] | null;
   drawMode: DrawMode;
   focus: MapFocus | null;
+  inspect: MapInspect | null;
   resetToken: number;
   onSelectDaerah: (id: number | null) => void;
   onDrawn: (rings: Ring[]) => void;
   onDrawModeChange: (m: DrawMode) => void;
   onCellPick: (info: CellInfo) => void;
+  onBasemapError: (message: string) => void;
 }
 
-const TILES: Record<Exclude<Basemap, 'none'>, [string, L.TileLayerOptions]> = {
-  osm: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+type TileBase = Exclude<Basemap, 'none' | 'google' | 'google-sat'>;
+const TILES: Record<TileBase, [string, L.TileLayerOptions]> = {
+  // CARTO Voyager: OpenStreetMap data in a soft, Google-like street style
+  streets: ['https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    maxZoom: 20, subdomains: 'abcd',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
   }],
   light: ['https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19, subdomains: 'abcd',
+    maxZoom: 20, subdomains: 'abcd',
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  }],
+  osm: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }],
 };
 
 const DATA_ATTRIBUTION = 'Layers: Copernicus GLO-30, JRC GSW, ESA WorldCover, Meta HRSL, Overture Maps';
+const KIND_LABEL: Record<FacilityKind, string> = {
+  hospital: 'Hospital', clinic: 'Clinic', school: 'School', police: 'Police station', fire: 'Fire & rescue', station: 'Rail station',
+};
+const KIND_RADIUS: Record<FacilityKind, number> = { hospital: 7, clinic: 4, school: 4.5, police: 5, fire: 5.5, station: 5 };
+const LAYER_KINDS: Record<'hospital' | 'clinic' | 'school' | 'emergency' | 'rail', FacilityKind[]> = {
+  hospital: ['hospital'], clinic: ['clinic'], school: ['school'], emergency: ['police', 'fire'], rail: ['station'],
+};
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -69,12 +92,13 @@ function riskChip(cls: string): HTMLElement {
   return chip;
 }
 
-function cellPopup(info: CellInfo, sc: Scenario, onAsk: () => void): HTMLElement {
+function cellPopup(info: CellInfo, sc: Scenario, onAsk: () => void, title?: string): HTMLElement {
   const root = el('div', 'cell-pop');
   const head = el('div', 'head');
-  const title = el('strong', undefined, info.federal ? 'Federal territory' : info.daerah ?? '—');
-  head.append(title, riskChip(info.federal ? 'Outside scope' : String(CLASS_NAME[info.cls[sc.key]])));
+  const name = title ?? (info.federal ? 'Federal territory' : info.daerah ?? '—');
+  head.append(el('strong', undefined, name), riskChip(info.federal ? 'Outside scope' : String(CLASS_NAME[info.cls[sc.key]])));
   root.append(head);
+  if (title && info.daerah) root.append(el('div', 'muted', info.daerah));
   const dl = el('dl');
   const add = (k: string, v: string) => { dl.append(el('dt', undefined, k), el('dd', undefined, v)); };
   add('Scenario', sc.label);
@@ -101,44 +125,67 @@ function cellPopup(info: CellInfo, sc: Scenario, onAsk: () => void): HTMLElement
   return root;
 }
 
+function facilityStyle(f: Facility, sc: Scenario): L.CircleMarkerOptions {
+  const c = classOf(f.s, sc);
+  const fill = c === 3 ? RISK_COLOR.High : c === 2 ? RISK_COLOR.Moderate : '#FFFFFF';
+  return { radius: KIND_RADIUS[f.k], weight: f.k === 'hospital' ? 2.5 : 1.6, color: '#111111', fillColor: fill, fillOpacity: 1 };
+}
+
 export const MapView: FC<Props> = (props) => {
-  const { bundle, scenario, layers, basemap, selectedDaerah, drawn, drawMode, focus, resetToken } = props;
+  const { bundle, grid, scenario, layers, basemap, selectedDaerah, drawn, drawMode, focus, inspect, resetToken } = props;
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   // Leaflet handlers are bound once; they read the latest props through this ref.
   const cb = useRef(props);
   useLayoutEffect(() => { cb.current = props; });
   const refs = useRef<{
-    tiles?: L.TileLayer;
+    tiles?: L.TileLayer; googleAttr?: string; googleSessionId?: string;
     susc?: L.ImageOverlay; suscUrl?: string;
     hist?: L.ImageOverlay; histPainted?: boolean;
     built?: L.ImageOverlay; builtPainted?: boolean;
+    safe?: L.ImageOverlay; safeUrl?: string;
     rivers?: L.GeoJSON; bounds?: L.GeoJSON; sites?: L.LayerGroup;
+    rail?: L.LayerGroup; railLines?: { line: L.Polyline; key: string }[];
+    facilities?: Record<string, L.LayerGroup>; facilityMarkers?: { m: L.CircleMarker; f: Facility }[];
     drawn?: L.Polygon; focusMarker?: L.CircleMarker;
     selangor?: L.LatLngBounds;
     /** a rectangle drag ends with a click event; ignore clicks until this time */
     quietUntil?: number;
   }>({});
 
+  const openCellPopup = (latlng: L.LatLng, title?: string) => {
+    const m = map.current;
+    const p = cb.current;
+    if (!m) return;
+    const info = queryCell(p.grid, p.bundle.model, latlng.lng, latlng.lat);
+    if (!info) return;
+    L.popup({ maxWidth: 270 })
+      .setLatLng(latlng)
+      .setContent(cellPopup(info, p.scenario, () => { cb.current.onCellPick(info); m.closePopup(); }, title))
+      .openOn(m);
+  };
+  const openRef = useRef(openCellPopup);
+  useLayoutEffect(() => { openRef.current = openCellPopup; });
+
   // ── init once ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!box.current || map.current) return;
-    const m = L.map(box.current, { zoomControl: false, minZoom: 8, maxZoom: 18, zoomSnap: 0.25, attributionControl: true });
+    const m = L.map(box.current, { zoomControl: false, minZoom: 8, maxZoom: 19, zoomSnap: 0.25, attributionControl: true });
     map.current = m;
-    L.control.zoom({ position: 'topright' }).addTo(m);
+    L.control.zoom({ position: 'bottomright' }).addTo(m);
     L.control.scale({ position: 'bottomright', imperial: false }).addTo(m);
     m.attributionControl.addAttribution(DATA_ATTRIBUTION);
-    for (const [name, z] of [['raster', 350], ['history', 360], ['rivers', 420], ['bounds', 430], ['drawn', 450], ['sites', 460]] as const) {
+    for (const [name, z] of [['raster', 350], ['history', 360], ['safe', 365], ['rivers', 420], ['rail', 425], ['bounds', 430], ['drawn', 450], ['facilities', 455], ['sites', 460]] as const) {
       m.createPane(name).style.zIndex = String(z);
     }
-    m.getPane('raster')!.style.pointerEvents = 'none';
-    m.getPane('history')!.style.pointerEvents = 'none';
+    for (const p of ['raster', 'history', 'safe']) m.getPane(p)!.style.pointerEvents = 'none';
 
     const r = refs.current;
     const gb = gridBounds(bundle.grid);
     r.susc = L.imageOverlay('', gb, { pane: 'raster', className: 'pixelated', interactive: false });
-    r.hist = L.imageOverlay('', gb, { pane: 'history', className: 'pixelated', interactive: false, opacity: 1 });
+    r.hist = L.imageOverlay('', gb, { pane: 'history', className: 'pixelated', interactive: false });
     r.built = L.imageOverlay('', gb, { pane: 'raster', className: 'pixelated', interactive: false });
+    r.safe = L.imageOverlay('', gb, { pane: 'safe', className: 'pixelated', interactive: false });
 
     // rivers on a canvas renderer (thousands of lines)
     const riverRenderer = L.canvas({ pane: 'rivers', padding: 0.3 });
@@ -150,6 +197,43 @@ export const MapView: FC<Props> = (props) => {
       },
       interactive: false,
     });
+
+    // rail: white casing under each line, so lines read on any basemap
+    const railRenderer = L.canvas({ pane: 'rail', padding: 0.3 });
+    r.rail = L.layerGroup([], { pane: 'rail' });
+    r.railLines = [];
+    for (const f of bundle.rail.features) {
+      const key = String(f.properties?.k ?? 'other');
+      const name = bundle.rail.lines[key]?.name ?? 'Rail';
+      const gj = L.geoJSON(f, { style: () => ({ renderer: railRenderer, color: '#FFFFFF', weight: 6, opacity: 0.9 } as L.PathOptions), interactive: false });
+      const line = L.geoJSON(f, { style: () => ({ renderer: railRenderer, color: RAIL_NEUTRAL, weight: 3.2, opacity: 1 } as L.PathOptions) });
+      line.bindTooltip(name, { sticky: true, className: 'cc-tip' });
+      r.rail.addLayer(gj).addLayer(line);
+      line.eachLayer(l => r.railLines!.push({ line: l as L.Polyline, key }));
+    }
+
+    // facilities, one group per toggle, on a shared canvas renderer
+    const facRenderer = L.canvas({ pane: 'facilities', padding: 0.3, tolerance: 4 });
+    r.facilities = {};
+    r.facilityMarkers = [];
+    for (const [group, kinds] of Object.entries(LAYER_KINDS)) {
+      const lg = L.layerGroup([], { pane: 'facilities' });
+      for (const f of bundle.facilities.items.filter(x => kinds.includes(x.k))) {
+        const mk = L.circleMarker([f.c[1], f.c[0]], { ...facilityStyle(f, cb.current.scenario), pane: 'facilities', renderer: facRenderer });
+        mk.bindTooltip(() => {
+          const sc = cb.current.scenario;
+          return `<strong>${KIND_LABEL[f.k]}</strong><br>${f.n.replace(/[<>&]/g, '')}<br>${CLASS_NAME[classOf(f.s, sc)]} (${sc.label})`;
+        }, { className: 'cc-tip', direction: 'top', offset: [0, -4] });
+        mk.on('click', (e: L.LeafletMouseEvent) => {
+          L.DomEvent.stopPropagation(e);
+          if (cb.current.drawMode !== 'none') return;
+          openRef.current(L.latLng(f.c[1], f.c[0]), f.n);
+        });
+        lg.addLayer(mk);
+        r.facilityMarkers.push({ m: mk, f });
+      }
+      r.facilities[group] = lg;
+    }
 
     // daerah boundaries — interactive; federal territories drawn as excluded
     r.bounds = L.geoJSON(bundle.daerah, {
@@ -206,14 +290,8 @@ export const MapView: FC<Props> = (props) => {
 
     // map click → inspect a cell
     m.on('click', (e: L.LeafletMouseEvent) => {
-      const p = cb.current;
-      if (p.drawMode !== 'none' || Date.now() < (refs.current.quietUntil ?? 0)) return;
-      const info = queryCell(p.grid, p.bundle.model, e.latlng.lng, e.latlng.lat);
-      if (!info) return;
-      L.popup({ maxWidth: 260 })
-        .setLatLng(e.latlng)
-        .setContent(cellPopup(info, p.scenario, () => { cb.current.onCellPick(info); m.closePopup(); }))
-        .openOn(m);
+      if (cb.current.drawMode !== 'none' || Date.now() < (refs.current.quietUntil ?? 0)) return;
+      openRef.current(e.latlng);
     });
 
     const ro = new ResizeObserver(() => m.invalidateSize());
@@ -221,16 +299,51 @@ export const MapView: FC<Props> = (props) => {
     return () => { ro.disconnect(); m.remove(); map.current = null; };
   }, [bundle]);
 
-  // ── basemap ────────────────────────────────────────────────────────────
+  // ── basemap (incl. optional Google Map Tiles API) ─────────────────────
   useEffect(() => {
     const m = map.current, r = refs.current;
     if (!m) return;
+    let cancelled = false;
+    const clearGoogleAttr = () => {
+      if (r.googleAttr) m.attributionControl.removeAttribution(r.googleAttr);
+      r.googleAttr = undefined;
+    };
     r.tiles?.remove();
     r.tiles = undefined;
-    if (basemap !== 'none') {
-      const [url, opt] = TILES[basemap];
-      r.tiles = L.tileLayer(url, opt).addTo(m);
+    clearGoogleAttr();
+    if (basemap === 'none') return;
+    if (basemap === 'google' || basemap === 'google-sat') {
+      const type: GoogleMapType = basemap === 'google' ? 'roadmap' : 'satellite';
+      let onMove: (() => void) | null = null;
+      googleSession(type).then(session => {
+        if (cancelled) return;
+        r.googleSessionId = session;
+        r.tiles = L.tileLayer(googleTileUrl(session), { maxZoom: 21, attribution: '' }).addTo(m);
+        const setAttr = (text: string) => {
+          clearGoogleAttr();
+          r.googleAttr = `<span class="google-attr">Google</span> ${text.replace(/[<>&]/g, '')}`;
+          m.attributionControl.addAttribution(r.googleAttr);
+        };
+        setAttr(`Map data ©${new Date().getFullYear()} Google`);
+        let t: ReturnType<typeof setTimeout> | undefined;
+        onMove = () => {
+          clearTimeout(t);
+          t = setTimeout(async () => {
+            const b = m.getBounds();
+            const c = await googleCopyright(session, { north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() }, m.getZoom());
+            if (c && !cancelled) setAttr(c);
+          }, 500);
+        };
+        m.on('moveend', onMove);
+        onMove();
+      }).catch(err => {
+        if (!cancelled) cb.current.onBasemapError(`Google basemap unavailable (${err.message}). Showing Streets instead.`);
+      });
+      return () => { cancelled = true; if (onMove) m.off('moveend', onMove); };
     }
+    const [url, opt] = TILES[basemap];
+    r.tiles = L.tileLayer(url, opt).addTo(m);
+    return () => { cancelled = true; };
   }, [basemap]);
 
   // ── susceptibility overlay (re-painted on scenario change) ─────────────
@@ -251,7 +364,7 @@ export const MapView: FC<Props> = (props) => {
     return () => { cancelled = true; };
   }, [bundle, scenario, layers.susceptibility, layers.showLow]);
 
-  // ── history / built-up overlays (painted once, on first use) ───────────
+  // ── history / built-up / safe-land overlays (painted on first use) ─────
   useEffect(() => {
     const m = map.current, r = refs.current;
     if (!m || !r.hist) return;
@@ -274,6 +387,16 @@ export const MapView: FC<Props> = (props) => {
     r.built.addTo(m);
   }, [bundle, layers.built]);
 
+  useEffect(() => {
+    const m = map.current, r = refs.current;
+    if (!m || !r.safe) return;
+    if (!layers.safe || !grid.detail) { r.safe.remove(); return; }
+    if (!r.safeUrl) {
+      canvasToUrl(safeCanvas(grid, bundle.model)).then(url => { r.safeUrl = url; r.safe!.setUrl(url); });
+    }
+    r.safe.addTo(m);
+  }, [bundle, grid, layers.safe]);
+
   // ── vector layers on/off ───────────────────────────────────────────────
   useEffect(() => {
     const m = map.current, r = refs.current;
@@ -286,7 +409,26 @@ export const MapView: FC<Props> = (props) => {
     sync(r.rivers, layers.rivers);
     sync(r.bounds, layers.boundaries);
     sync(r.sites, layers.sites);
-  }, [layers.rivers, layers.boundaries, layers.sites]);
+    sync(r.rail, layers.rail);
+    sync(r.facilities?.rail, layers.rail);
+    sync(r.facilities?.hospital, layers.hospital);
+    sync(r.facilities?.clinic, layers.clinic);
+    sync(r.facilities?.school, layers.school);
+    sync(r.facilities?.emergency, layers.emergency);
+  }, [layers.rivers, layers.boundaries, layers.sites, layers.rail, layers.hospital, layers.clinic, layers.school, layers.emergency]);
+
+  // facility colours follow the scenario; rail takes operator colours only
+  // when the risk layer is off (their reds/oranges/blues would read as risk classes)
+  useEffect(() => {
+    const r = refs.current;
+    for (const { m, f } of r.facilityMarkers ?? []) m.setStyle(facilityStyle(f, scenario));
+  }, [scenario]);
+  useEffect(() => {
+    const r = refs.current;
+    for (const { line, key } of r.railLines ?? []) {
+      line.setStyle({ color: layers.susceptibility ? RAIL_NEUTRAL : bundle.rail.lines[key]?.color ?? RAIL_NEUTRAL });
+    }
+  }, [bundle, layers.susceptibility]);
 
   // ── daerah styling + zoom on selection ─────────────────────────────────
   useEffect(() => {
@@ -320,7 +462,7 @@ export const MapView: FC<Props> = (props) => {
     m.flyToBounds(r.selangor, { padding: [16, 16], duration: 0.5 });
   }, [resetToken]);
 
-  // ── search focus ───────────────────────────────────────────────────────
+  // ── search / agent focus ───────────────────────────────────────────────
   useEffect(() => {
     const m = map.current, r = refs.current;
     if (!m || !focus) return;
@@ -332,6 +474,15 @@ export const MapView: FC<Props> = (props) => {
     if (b.getNorth() - b.getSouth() < 0.004) m.flyTo(focus.point, 15, { duration: 0.6 });
     else m.flyToBounds(b, { padding: [40, 40], maxZoom: 15, duration: 0.6 });
   }, [focus]);
+
+  // ── open a cell popup on request (locate-me, copilot) ─────────────────
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !inspect) return;
+    const ll = L.latLng(inspect.lat, inspect.lon);
+    m.flyTo(ll, Math.max(m.getZoom(), 14), { duration: 0.6 });
+    m.once('moveend', () => openRef.current(ll, inspect.title));
+  }, [inspect]);
 
   // ── drawn polygon ──────────────────────────────────────────────────────
   useEffect(() => {

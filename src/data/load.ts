@@ -3,7 +3,8 @@
 
 import type { FeatureCollection } from 'geojson';
 import type {
-  AppDataBundle, Grid, GridDetail, GridMeta, LayerIndex, ModelSpec, Place, StatsFile, ValidationFile,
+  AppDataBundle, FacilitiesFile, Grid, GridDetail, GridMeta, LayerIndex, ModelSpec, Place, RailFile, StatsFile,
+  ValidationFile,
 } from './types';
 
 const BASE = `${import.meta.env.BASE_URL}data/`;
@@ -41,7 +42,7 @@ function decode(buf: ArrayBuffer, layers: LayerIndex[], n: number): Record<strin
 }
 
 export async function loadCore(): Promise<AppDataBundle> {
-  const [meta, stats, model, validation, daerah, rivers, places] = await Promise.all([
+  const [meta, stats, model, validation, daerah, rivers, places, facilities, rail] = await Promise.all([
     json<GridMeta>('grid.json'),
     json<StatsFile>('stats.json'),
     json<ModelSpec>('model.json'),
@@ -49,11 +50,13 @@ export async function loadCore(): Promise<AppDataBundle> {
     json<FeatureCollection>('daerah.json'),
     json<FeatureCollection>('rivers.json'),
     json<Place[]>('places.json'),
+    json<FacilitiesFile>('facilities.json'),
+    json<RailFile>('rail.json'),
   ]);
   const n = meta.width * meta.height;
   const core = decode(await gunzip('grid_core.bin.gz'), meta.files['grid_core.bin.gz'], n);
   const grid = { meta, ...core } as unknown as Grid;
-  return { grid, stats, model, validation, daerah, rivers, places };
+  return { grid, stats, model, validation, daerah, rivers, places, facilities, rail };
 }
 
 export async function loadDetail(meta: GridMeta): Promise<GridDetail> {

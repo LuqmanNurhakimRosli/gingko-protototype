@@ -23,6 +23,9 @@ export const SERIES_COLOR = '#08A045';
 export const HISTORY_RGB: [number, number, number] = [98, 80, 214];  // violet
 export const BUILT_RGB: [number, number, number] = [55, 65, 81];     // slate
 export const RIVER_COLOR = '#1C5CAB';
+/** Screened candidate land (brand green — not part of the risk scale). */
+export const SAFE_RGB: [number, number, number] = [8, 160, 69];
+export const RAIL_NEUTRAL = '#374151';
 
 export const fmtInt = (n: number) => Math.round(n).toLocaleString('en-MY');
 

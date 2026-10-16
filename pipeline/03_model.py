@@ -215,7 +215,11 @@ def main():
     for s in sites:
         ev = evaluate(*s["resolved"]["lonlat"])
         p = ev["scenarios"]["normal"]["point"]
-        ev |= {k: s[k] for k in ("id", "name", "daerah", "report", "sources")}
+        ev |= {k: s[k] for k in ("id", "name", "report", "sources")}
+        # daerah from the boundary data at the point, not from the site list
+        rr, cc = rc(*s["resolved"]["lonlat"])
+        dz = int(daerah[rr, cc])
+        ev["daerah"] = DAERAH[dz - 1] if 1 <= dz <= 9 else ("Federal territory" if dz == 10 else None)
         ev["outside_scope"] = bool(s.get("outside_scope"))
         ev["resolved_from"] = s["resolved"]["matched"]
         ev["kind"] = "reported_flood"

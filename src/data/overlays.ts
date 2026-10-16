@@ -1,9 +1,9 @@
 // Ginkgo Command Center — paints grid layers into canvases for Leaflet image overlays.
 // Pure rendering of precomputed values; class thresholds come from model.json.
 
-import { classOf } from './analysis';
-import { BUILT_RGB, HISTORY_RGB, RISK_RGB } from './format';
-import type { Grid, Scenario } from './types';
+import { classOf, isCandidateCell } from './analysis';
+import { BUILT_RGB, HISTORY_RGB, RISK_RGB, SAFE_RGB } from './format';
+import type { Grid, ModelSpec, Scenario } from './types';
 
 function paint(grid: Grid, fill: (i: number, px: Uint8ClampedArray, o: number) => void): HTMLCanvasElement {
   const { width, height } = grid.meta;
@@ -49,6 +49,15 @@ export function builtCanvas(grid: Grid): HTMLCanvasElement {
     if (v < 10 || grid.daerah[i] < 1) return;
     px[o] = r; px[o + 1] = g; px[o + 2] = b;
     px[o + 3] = Math.round(v * 1.6);
+  });
+}
+
+/** Screened candidate land: the same test as the report's development screen. */
+export function safeCanvas(grid: Grid, model: ModelSpec): HTMLCanvasElement {
+  const [r, g, b] = SAFE_RGB;
+  return paint(grid, (i, px, o) => {
+    if (!isCandidateCell(grid, model, i)) return;
+    px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = 175;
   });
 }
 
