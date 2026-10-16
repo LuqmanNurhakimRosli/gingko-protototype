@@ -41,17 +41,24 @@
   --text-disabled:  #BBBBBB;
 
   /* Semantic Risk Colors (Restrained) */
-  --risk-low-text:    #15803D;
-  --risk-low-bg:      #ECFDF5;
-  --risk-low-border:  #A7F3D0;
+  --risk-low-text:    #1C5CAB;
+  --risk-low-bg:      #EEF4FC;
+  --risk-low-border:  #B7D3F6;
 
-  --risk-mod-text:    #D97706;
+  --risk-mod-text:    #B45309;
   --risk-mod-bg:      #FFFBEB;
   --risk-mod-border:  #FDE68A;
 
   --risk-high-text:   #DC2626;
   --risk-high-bg:     #FEF2F2;
   --risk-high-border: #FECACA;
+
+  /* Risk fills — one scale for map, bars, legend and report.
+     Validated for colour-vision deficiency (all pairs ΔE ≥ 18.7); amber is
+     below 3:1 on white, so a class is never shown by colour alone. */
+  --risk-high: #DC2626;
+  --risk-mod:  #EDA100;
+  --risk-low:  #2A78D6;
 
   /* Zone Colors (Malaysian Planning) */
   --zone-r1: #4ADE80;

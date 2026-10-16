@@ -1,0 +1,17 @@
+{
+  "title": "Population and Housing Census of Malaysia 2020 (MyCensus 2020) — Selangor, by administrative district",
+  "retrieved": "2026-10-16",
+  "note": "The nine district figures sum to 6,994,423, which equals the Selangor total published on DOSM's Kawasanku dashboard. DOSM's own pages were not machine-readable from the build environment; figures marked 'citypopulation.de' reproduce the 2020 census and are reconciled by that sum.",
+  "state_total": {"value": 6994423, "source": "https://open.dosm.gov.my/dashboard/kawasanku/Selangor"},
+  "districts": {
+    "Sabak Bernam":   {"value": 107057,  "source": "https://www.citypopulation.de/en/malaysia/admin/10__selangor/"},
+    "Hulu Selangor":  {"value": 243029,  "source": "https://www.citypopulation.de/en/malaysia/admin/10__selangor/"},
+    "Kuala Selangor": {"value": 281711,  "source": "https://www.citypopulation.de/en/malaysia/admin/10__selangor/"},
+    "Gombak":         {"value": 942400,  "source": "https://www.citypopulation.de/en/malaysia/admin/10__selangor/"},
+    "Petaling":       {"value": 2298130, "source": "https://www.dosm.gov.my/portal-main/release-content/key-findings-population-and-housing-census-of-malaysia-2020-administrative-district"},
+    "Klang":          {"value": 1088942, "source": "https://open.dosm.gov.my/dashboard/kawasanku/Selangor/district/Klang"},
+    "Kuala Langat":   {"value": 307449,  "source": "https://www.citypopulation.de/en/malaysia/admin/10__selangor/"},
+    "Hulu Langat":    {"value": 1400461, "source": "https://www.dosm.gov.my/portal-main/release-content/key-findings-population-and-housing-census-of-malaysia-2020-administrative-district"},
+    "Sepang":         {"value": 325244,  "source": "https://www.citypopulation.de/en/malaysia/admin/10__selangor/"}
+  }
+}
