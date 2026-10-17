@@ -9,7 +9,7 @@ import type {
 
 const BASE = `${import.meta.env.BASE_URL}data/`;
 
-async function json<T>(name: string): Promise<T> {
+export async function json<T>(name: string): Promise<T> {
   const res = await fetch(BASE + name);
   if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
   return res.json() as Promise<T>;
@@ -17,7 +17,7 @@ async function json<T>(name: string): Promise<T> {
 
 /** Fetch a .gz file. Some static hosts already decode it (Content-Encoding),
  *  others serve the raw gzip bytes; check the magic number and handle both. */
-async function gunzip(name: string): Promise<ArrayBuffer> {
+export async function gunzip(name: string): Promise<ArrayBuffer> {
   const res = await fetch(BASE + name);
   if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
   const buf = await res.arrayBuffer();

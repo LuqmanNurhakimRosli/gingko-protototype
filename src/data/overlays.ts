@@ -10,7 +10,7 @@ const latOf = (y: number) => (360 / Math.PI) * Math.atan(Math.exp(y)) - 90;
 
 /** Source grid row for each image row. The map stretches an image linearly in
  *  Web Mercator, so rows are spaced in Mercator y (≤ 30 m shift otherwise). */
-function mercatorRows(meta: GridMeta): Int32Array {
+export function mercatorRows(meta: GridMeta): Int32Array {
   const { y1, res, height } = meta;
   const top = mercY(y1), bottom = mercY(y1 - height * res);
   const rows = new Int32Array(height);

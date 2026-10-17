@@ -10,6 +10,7 @@ import { MAP_LAYERS, type MapLayerName } from './agentSpec';
 import { searchPlaces } from '../data/places';
 import { CAVEATS, SOURCES } from '../services/exports';
 import type { AppDataBundle, Facility, FacilityKind, Grid, Scenario, ScenarioKey } from '../data/types';
+import { runDrillTool, type DrillActions, type DrillSnapshot } from './drillTools';
 
 export interface AgentView {
   scenario: ScenarioKey;
@@ -39,6 +40,10 @@ export interface ToolContext {
   daerahCells: (id: number) => Int32Array;
   getView: () => AgentView;
   actions: AgentActions;
+  /** flood drill state (a ref, so tools in one answer see each other's changes) and its UI actions */
+  getDrill: () => DrillSnapshot;
+  setDrill: (s: DrillSnapshot) => void;
+  drillActions: DrillActions;
 }
 
 export interface ToolOutcome { result: unknown; step: string; isError?: boolean }
@@ -355,8 +360,11 @@ function run(ctx: ToolContext, name: string, input: Record<string, unknown>): To
       ctx.actions.showPoint(lat, lon, label);
       return { step: `Showed ${label || 'the spot'} on the map`, result: { shown: true } };
     }
-    default:
+    default: {
+      const drill = runDrillTool(ctx, name, input);
+      if (drill) return drill;
       throw new ToolInputError(`unknown tool ${name}`);
+    }
   }
 }
 

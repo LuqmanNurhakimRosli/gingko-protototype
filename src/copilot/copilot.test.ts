@@ -113,6 +113,9 @@ describe('agent tools over the real data', () => {
   const ctx: ToolContext = {
     bundle, grid: bundle.grid,
     daerahCells: id => cellsOf(bundle.grid, id),
+    getDrill: () => ({ active: false, sim: null, t: 0, plan: null, data: null }),
+    setDrill: () => {},
+    drillActions: { startDrill: () => {}, routeFrom: () => {} },
     getView: () => view,
     actions: {
       showArea: (_r, label) => shown.push(label),

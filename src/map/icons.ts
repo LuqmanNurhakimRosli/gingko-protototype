@@ -19,6 +19,14 @@ const GLYPH: Record<FacilityKind | 'airport', string> = {
   airport: 'M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z',
 };
 
+// evacuation centre kinds (white glyph on a circle coloured by how full the centre is)
+const SHELTER_GLYPH: Record<string, string> = {
+  school: GLYPH.school,
+  hall: 'M12 3 1.5 11H4v9.5h6v-6h4v6h6V11h2.5z',
+  mosque: 'M12 2.5c-.9 1.7-4.6 3.6-4.6 7.6V12h9.2v-1.9c0-4-3.7-5.9-4.6-7.6zM6 13h12v8h-4v-3.5a2 2 0 0 0-4 0V21H6zM2.5 8.5h2V21h-2zm17 0h2V21h-2z',
+  sports: 'M12 4.5C6.2 4.5 1.5 6.8 1.5 9.8v4.4c0 3 4.7 5.3 10.5 5.3s10.5-2.3 10.5-5.3V9.8c0-3-4.7-5.3-10.5-5.3zm0 2.2c4.6 0 8.2 1.5 8.2 3.2S16.6 13 12 13s-8.2-1.5-8.2-3.1S7.4 6.7 12 6.7z',
+};
+
 type Made = { image: { width: number; height: number; data: Uint8Array }; options: Partial<StyleImageMetadata> };
 
 function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
@@ -90,8 +98,16 @@ function airport(): Made {
   return done(c, ctx);
 }
 
+function shelterGlyph(kind: string): Made {
+  const [c, ctx] = canvas(16, 16);
+  glyph(ctx, SHELTER_GLYPH[kind], 8, 8, 13, '#FFFFFF');
+  return done(c, ctx);
+}
+
 /** Build the image for a missing icon id, or null if the id is not ours. */
 export function makeIcon(id: string): Made | null {
+  const sh = /^sh-(\w+)$/.exec(id);
+  if (sh && sh[1] in SHELTER_GLYPH) return shelterGlyph(sh[1]);
   const fac = /^fac-(\w+)-(\d)$/.exec(id);
   if (fac && fac[1] in GLYPH) return facilityPin(fac[1] as FacilityKind, Number(fac[2]));
   if (id === 'shield-expressway') return shield(true);

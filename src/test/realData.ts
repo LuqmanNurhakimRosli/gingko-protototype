@@ -5,6 +5,8 @@ import type { FeatureCollection } from 'geojson';
 import type {
   AppDataBundle, FacilitiesFile, Grid, GridDetail, GridMeta, LayerIndex, ModelSpec, Place, RailFile, StatsFile, ValidationFile,
 } from '../data/types';
+import { decodeRoads, type RoadGraph, type RoadsMeta } from '../sim/graph';
+import type { SheltersFile } from '../sim/evac';
 
 const dir = new URL('../../public/data/', import.meta.url);
 export const json = <T>(name: string): T => JSON.parse(readFileSync(new URL(name, dir), 'utf8')) as T;
@@ -46,3 +48,11 @@ export function cellsOf(grid: Grid, id: number): Int32Array {
   for (let i = 0; i < grid.daerah.length; i++) if (grid.daerah[i] === id) out.push(i);
   return Int32Array.from(out);
 }
+
+export function loadRoads(): RoadGraph {
+  const meta = json<RoadsMeta>('roads.json');
+  const raw = gunzipSync(readFileSync(new URL('roads.bin.gz', dir)));
+  return decodeRoads(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer, meta);
+}
+
+export const loadShelters = (): SheltersFile => json<SheltersFile>('shelters.json');

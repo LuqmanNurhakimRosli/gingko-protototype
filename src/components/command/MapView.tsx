@@ -21,6 +21,8 @@ import { builtCanvas, canvasToUrl, classCanvas, gridCorners, historyCanvas, safe
 import type { AppDataBundle, FacilityKind, Grid, RiskClass, Scenario } from '../../data/types';
 import { makeIcon } from '../../map/icons';
 import { BASE_GROUP, basemapStyle, bundledUrls, SLOT_MARKERS, SLOT_RASTER, SLOT_VECTOR, type BaseVariant } from '../../map/style';
+import { CROWDING, type Crowding, type Shelter } from '../../sim/evac';
+import { LEVELS } from '../../sim/flood';
 
 export type DrawMode = 'none' | 'rect' | 'poly';
 export type Basemap = 'streets' | 'light' | 'google' | 'google-sat' | 'none';
@@ -45,6 +47,23 @@ export interface MapInspect { lat: number; lon: number; title?: string; me?: boo
 export interface MapPadding { top: number; bottom: number; left: number; right: number }
 /** Candidate sites from the site screen (AI or manual), shown as numbered pins. */
 export interface SiteSet { list: CandidateSite[]; label: string; lowUnder: string; token: number }
+/** Flood drill overlays: the painted water, alerts, evacuation centres and routes. */
+export interface DrillMap {
+  frame: HTMLCanvasElement | null;
+  frameKey: number;
+  shelters: Shelter[];
+  crowd: (id: number) => Crowding;
+  occupancy: (id: number) => number;
+  /** crowding code per centre (open, busy, crowded, full, closed = 0–4) */
+  crowdCodes: Uint8Array;
+  alerts: FeatureCollection<Point>;
+  routes: FeatureCollection;
+  origin: { point: [number, number]; label: string } | null;
+  selectedShelter: number | null;
+  /** views to fly to; each is applied when its token changes */
+  fits: DrillFit[];
+}
+export interface DrillFit { bounds: [[number, number], [number, number]]; token: string }
 
 interface Props {
   bundle: AppDataBundle;
@@ -67,6 +86,10 @@ interface Props {
   onDrawModeChange: (m: DrawMode) => void;
   onCellPick: (info: CellInfo) => void;
   onBasemapError: (message: string) => void;
+  drill?: DrillMap | null;
+  /** drill mode: a click on the map picks the start point of an evacuation route */
+  onDrillPick?: (lon: number, lat: number, label?: string) => void;
+  onShelterPick?: (id: number) => void;
 }
 
 const DATA_ATTRIBUTION = 'Flood model: Copernicus GLO-30 · JRC GSW · ESA WorldCover · Meta HRSL';
@@ -79,9 +102,10 @@ const LAYER_KINDS: Record<'hospital' | 'clinic' | 'school' | 'emergency', Facili
 const DRAW_COLOR = '#1A73E8';
 const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
-const RASTERS = ['built', 'risk', 'history', 'safe', 'cand'] as const;
+const RASTERS = ['built', 'risk', 'history', 'safe', 'cand', 'sim'] as const;
 type RasterId = typeof RASTERS[number];
-const INTERACTIVE = ['fac-icons', 'fac-stations', 'sites-circle', 'rail-line', 'daerah-fill'];
+const INTERACTIVE = ['shelter-circle', 'alert-dot', 'fac-icons', 'fac-stations', 'sites-circle', 'rail-line', 'daerah-fill'];
+const DRILL_LAYERS = ['route-alt', 'route-casing', 'route-line', 'alert-dot', 'alert-label', 'shelter-circle', 'shelter-icon', 'shelter-label', 'shelter-selected'];
 
 let protocolReady = false;
 function ensureProtocol() {
@@ -227,6 +251,7 @@ function addAppLayers(m: MLMap, bundle: AppDataBundle) {
     history: 0.8,
     safe: 0.7,
     cand: 0.9,
+    sim: 0.9,
   };
   for (const id of RASTERS) {
     m.addSource(id, { type: 'image', url: BLANK_PNG, coordinates: corners });
@@ -245,6 +270,9 @@ function addAppLayers(m: MLMap, bundle: AppDataBundle) {
   m.addSource('draft', { type: 'geojson', data: EMPTY });
   m.addSource('facilities', { type: 'geojson', data: EMPTY });
   m.addSource('sites', { type: 'geojson', data: siteData(bundle) });
+  m.addSource('shelters', { type: 'geojson', data: EMPTY, promoteId: 'id' });
+  m.addSource('alerts', { type: 'geojson', data: EMPTY });
+  m.addSource('routes', { type: 'geojson', data: EMPTY });
 
   const vec: LayerSpecification[] = [
     { id: 'rivers-line', type: 'line', source: 'rivers', layout: { visibility: 'none', 'line-cap': 'round' },
@@ -275,6 +303,13 @@ function addAppLayers(m: MLMap, bundle: AppDataBundle) {
       paint: { 'line-color': DRAW_COLOR, 'line-width': ['case', ['==', ['get', 'guide'], 1], 1.5, 2.5], 'line-dasharray': [2, 1.5] } },
     { id: 'draft-vertex', type: 'circle', source: 'draft', filter: ['==', ['geometry-type'], 'Point'],
       paint: { 'circle-radius': ['case', ['==', ['get', 'first'], 1], 6, 4], 'circle-color': '#FFFFFF', 'circle-stroke-color': DRAW_COLOR, 'circle-stroke-width': 2 } },
+    // drill: evacuation routes (Google-style blue for the chosen one, grey for the options)
+    { id: 'route-alt', type: 'line', source: 'routes', filter: ['==', ['get', 'chosen'], 0], layout: { visibility: 'none', 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#7C8BA1', 'line-opacity': 0.85, 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 3, 15, 6] } },
+    { id: 'route-casing', type: 'line', source: 'routes', filter: ['==', ['get', 'chosen'], 1], layout: { visibility: 'none', 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#0B57D0', 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 7, 15, 11] } },
+    { id: 'route-line', type: 'line', source: 'routes', filter: ['==', ['get', 'chosen'], 1], layout: { visibility: 'none', 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#4C8DF6', 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 4, 15, 7] } },
   ];
   vec.forEach(l => add(m, l, SLOT_VECTOR));
 
@@ -299,6 +334,29 @@ function addAppLayers(m: MLMap, bundle: AppDataBundle) {
       layout: { 'text-field': ['get', 'label'], 'text-font': ['NotoSans-Medium'], 'text-size': 11, 'text-anchor': 'left',
         'text-offset': [1, 0], 'text-max-width': 9, 'text-optional': true, 'symbol-sort-key': ['-', 3, ['get', 'c']] },
       paint: { 'text-color': ['match', ['get', 'c'], 3, '#B91C1C', 2, '#92400E', '#3C4043'], 'text-halo-color': '#FFFFFF', 'text-halo-width': 1.6 } },
+    // drill: neighbourhood alerts in JMA Kikikuru colours, evacuation centres by how full they are
+    { id: 'alert-dot', type: 'circle', source: 'alerts', minzoom: 10, layout: { visibility: 'none', 'circle-sort-key': ['get', 'level'] },
+      paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 4, 12, 6.5, 15, 8],
+        'circle-color': ['match', ['get', 'level'], 5, LEVELS[5].color, 4, LEVELS[4].color, 3, LEVELS[3].color, LEVELS[2].color],
+        'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 1.6 } },
+    { id: 'alert-label', type: 'symbol', source: 'alerts', minzoom: 11.5, filter: ['>=', ['get', 'level'], 4],
+      layout: { visibility: 'none', 'text-field': ['concat', ['get', 'name'], '\n', ['get', 'lead']], 'text-font': ['NotoSans-Medium'], 'text-size': 11,
+        'text-anchor': 'left', 'text-offset': [0.9, 0], 'text-max-width': 10, 'text-optional': true, 'symbol-sort-key': ['-', 6, ['get', 'level']] },
+      paint: { 'text-color': ['match', ['get', 'level'], 5, '#0C000C', '#8A008A'], 'text-halo-color': '#FFFFFF', 'text-halo-width': 1.8 } },
+    { id: 'shelter-selected', type: 'circle', source: 'shelters', filter: ['==', ['get', 'id'], -1], layout: { visibility: 'none' },
+      paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 9, 12, 14, 15, 18], 'circle-color': 'rgba(0,0,0,0)',
+        'circle-stroke-color': '#111111', 'circle-stroke-width': 2.5 } },
+    { id: 'shelter-circle', type: 'circle', source: 'shelters', layout: { visibility: 'none' },
+      paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 2.2, 10, 3.5, 11.5, 6.5, 13, 9.5, 16, 12],
+        'circle-color': ['match', ['coalesce', ['feature-state', 'crowd'], 0], 1, CROWDING.busy.color, 2, CROWDING.crowded.color, 3, CROWDING.full.color, 4, CROWDING.closed.color, CROWDING.open.color],
+        'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 8, 1, 13, 2] } },
+    { id: 'shelter-icon', type: 'symbol', source: 'shelters', minzoom: 11.5,
+      layout: { visibility: 'none', 'icon-image': ['concat', 'sh-', ['get', 'k']], 'icon-allow-overlap': true,
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 11.5, 0.7, 13, 0.95, 16, 1.25] } },
+    { id: 'shelter-label', type: 'symbol', source: 'shelters', minzoom: 13.5,
+      layout: { visibility: 'none', 'text-field': ['get', 'label'], 'text-font': ['NotoSans-Medium'], 'text-size': 11, 'text-anchor': 'top',
+        'text-offset': [0, 1.2], 'text-max-width': 9, 'text-optional': true },
+      paint: { 'text-color': '#137333', 'text-halo-color': '#FFFFFF', 'text-halo-width': 1.6 } },
   ];
   markers.forEach(l => add(m, l, SLOT_MARKERS));
 }
@@ -344,6 +402,8 @@ export const MapView: FC<Props> = (props) => {
     hover?: number | null;
     googleAttr?: HTMLElement;
     selangor?: LngLatBounds;
+    crowd?: Uint8Array;
+    startPin?: Marker;
     /** a rectangle drag ends with a click event; ignore clicks until this time */
     quietUntil?: number;
     onReady: (() => void)[];
@@ -452,6 +512,17 @@ export const MapView: FC<Props> = (props) => {
       const p = f.properties;
       const sc = cb.current.scenario;
       switch (f.layer.id) {
+        case 'shelter-circle': {
+          const d = cb.current.drill;
+          const s = d?.shelters[Number(p.id)];
+          if (!d || !s) return null;
+          const c = d.crowd(s.id);
+          return lines([s.n, 'strong'], `Evacuation centre · ${p.kind}`, `${CROWDING[c].label} · ${fmtInt(d.occupancy(s.id))} of ${fmtInt(s.cap)} places`);
+        }
+        case 'alert-dot': {
+          const lv = Number(p.level) as 2 | 3 | 4 | 5;
+          return lines([String(p.name), 'strong'], LEVELS[lv].name, String(p.lead), ['Click to plan an evacuation route', 'em']);
+        }
         case 'fac-icons':
         case 'fac-stations':
           return lines([KIND_LABEL[p.k as FacilityKind], 'strong'], String(p.n),
@@ -483,6 +554,19 @@ export const MapView: FC<Props> = (props) => {
       if (!r.current.ready || cb.current.drawMode !== 'none' || Date.now() < (r.current.quietUntil ?? 0)) return;
       const layersOn = INTERACTIVE.filter(id => m.getLayer(id) && m.getLayoutProperty(id, 'visibility') !== 'none');
       const hit = m.queryRenderedFeatures(e.point, { layers: layersOn });
+      if (cb.current.drill) {
+        // drill: a centre opens its card; anywhere else becomes the start of an evacuation route
+        const sh = hit.find(h => h.layer.id === 'shelter-circle');
+        if (sh) { cb.current.onShelterPick?.(Number(sh.properties.id)); return; }
+        const al = hit.find(h => h.layer.id === 'alert-dot');
+        if (al) {
+          const [lng, lat] = (al.geometry as Point).coordinates;
+          cb.current.onDrillPick?.(lng, lat, String(al.properties.name));
+          return;
+        }
+        cb.current.onDrillPick?.(e.lngLat.lng, e.lngLat.lat);
+        return;
+      }
       const pt = hit.find(h => h.layer.id !== 'daerah-fill' && h.layer.id !== 'rail-line');
       if (pt) {
         const [lng, lat] = (pt.geometry as Point).coordinates;
@@ -580,10 +664,11 @@ export const MapView: FC<Props> = (props) => {
       });
     });
   };
+  const drillOn = Boolean(props.drill);
   useEffect(() => {
-    showRaster('risk', layers.susceptibility, `${scenario.key}:${layers.showLow}`, () => classCanvas(bundle.grid, scenario, layers.showLow));
+    showRaster('risk', layers.susceptibility && !drillOn, `${scenario.key}:${layers.showLow}`, () => classCanvas(bundle.grid, scenario, layers.showLow));
     r.current.popup?.remove();
-  }, [bundle, scenario, layers.susceptibility, layers.showLow]);
+  }, [bundle, scenario, layers.susceptibility, layers.showLow, drillOn]);
   useEffect(() => { showRaster('history', layers.history, 'h', () => historyCanvas(bundle.grid)); }, [bundle, layers.history]);
   useEffect(() => { showRaster('built', layers.built, 'b', () => builtCanvas(bundle.grid)); }, [bundle, layers.built]);
   useEffect(() => {
@@ -688,6 +773,84 @@ export const MapView: FC<Props> = (props) => {
     list.forEach(x => b.extend(x.centre));
     m.fitBounds(b, { padding: pad(cb.current.padding, 70), maxZoom: 14, duration: 700 });
   }, [bundle, sites]);
+
+  // ── flood drill ────────────────────────────────────────────────────────
+  const drill = props.drill ?? null;
+  useEffect(() => {
+    whenReady(() => {
+      const m = map.current!;
+      for (const id of [...DRILL_LAYERS, 'sim-layer']) setVis(m, id, drillOn);
+      if (!drillOn) {
+        (m.getSource('routes') as GeoJSONSource).setData(EMPTY);
+        (m.getSource('alerts') as GeoJSONSource).setData(EMPTY);
+        r.current.startPin?.remove();
+        r.current.startPin = undefined;
+      }
+    });
+  }, [drillOn]);
+  const frame = drill?.frame ?? null;
+  const frameKey = drill?.frameKey ?? 0;
+  useEffect(() => {
+    if (!frame) return;
+    whenReady(() => (map.current!.getSource('sim') as ImageSource | undefined)?.updateImage({ image: frame }));
+  }, [frame, frameKey]);
+  const shelterList = drill?.shelters;
+  useEffect(() => {
+    if (!shelterList) return;
+    const KIND_NAME = { school: 'school', hall: 'community hall', mosque: 'mosque', sports: 'stadium / sports hall' };
+    whenReady(() => {
+      (map.current!.getSource('shelters') as GeoJSONSource).setData({
+        type: 'FeatureCollection',
+        features: shelterList.map(s => ({ type: 'Feature', properties: { id: s.id, k: s.k, kind: KIND_NAME[s.k], label: labelText(s.n), cap: s.cap }, geometry: { type: 'Point', coordinates: s.c } })),
+      });
+      r.current.crowd = undefined;
+    });
+  }, [shelterList]);
+  const codes = drill?.crowdCodes;
+  useEffect(() => {
+    if (!codes || !shelterList) return;
+    whenReady(() => {
+      const m = map.current!;
+      const prev = r.current.crowd;
+      codes.forEach((c, id) => { if (!prev || prev[id] !== c) m.setFeatureState({ source: 'shelters', id }, { crowd: c }); });
+      r.current.crowd = codes;
+    });
+  }, [codes, shelterList]);
+  const alerts = drill?.alerts;
+  useEffect(() => {
+    if (alerts) whenReady(() => (map.current!.getSource('alerts') as GeoJSONSource).setData(alerts));
+  }, [alerts]);
+  const routes = drill?.routes;
+  useEffect(() => {
+    if (routes) whenReady(() => (map.current!.getSource('routes') as GeoJSONSource).setData(routes));
+  }, [routes]);
+  const selectedShelter = drill?.selectedShelter ?? -1;
+  useEffect(() => {
+    whenReady(() => map.current!.setFilter('shelter-selected', ['==', ['get', 'id'], selectedShelter]));
+  }, [selectedShelter]);
+  const start = drill?.origin ?? null;
+  useEffect(() => {
+    const m = map.current;
+    r.current.startPin?.remove();
+    r.current.startPin = undefined;
+    if (!m || !start) return;
+    const e = el('div', 'start-pin');
+    e.append(el('i'), el('span', undefined, start.label));
+    r.current.startPin = new Marker({ element: e, anchor: 'left', offset: [-8, 0] }).setLngLat(start.point).addTo(m);
+  }, [start]);
+  // fly to a drill view when its token changes (the bounds are read from the latest props)
+  const fitTokens = (drill?.fits ?? []).map(f => f.token).join('|');
+  const lastFits = useRef<string[]>([]);
+  useEffect(() => {
+    const m = map.current;
+    const fits = cb.current.drill?.fits ?? [];
+    const fresh = fits.filter(f => !lastFits.current.includes(f.token));
+    lastFits.current = fits.map(f => f.token);
+    const fit = fresh[fresh.length - 1];
+    if (!m || !fit) return;
+    const [[s, w], [n, e]] = fit.bounds;
+    m.fitBounds([[w, s], [e, n]], { padding: pad(cb.current.padding, 50), maxZoom: 15.5, duration: 800 });
+  }, [fitTokens]);
 
   // ── drawn polygon ──────────────────────────────────────────────────────
   useEffect(() => {

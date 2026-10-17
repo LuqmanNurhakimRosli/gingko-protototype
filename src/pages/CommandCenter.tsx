@@ -16,7 +16,9 @@ import { detectIntent, type CopilotContext, type Subject } from '../copilot/expl
 import type { MapLayerName } from '../copilot/agentSpec';
 import type { AgentView, ViewChange } from '../copilot/agentTools';
 import { useAgent, type AgentSession } from '../copilot/useAgent';
-import { TopBar } from '../components/command/TopBar';
+import { ModeSwitch, TopBar } from '../components/command/TopBar';
+import { GinkgoMark } from '../components/brand/GinkgoMark';
+import type { Shelter } from '../sim/evac';
 import { DaerahPanel } from '../components/command/DaerahPanel';
 import {
   MapView, type Basemap, type DrawMode, type LayerState, type MapFocus, type MapInspect, type MapPadding, type SiteSet,
@@ -30,9 +32,32 @@ import { BottomBar, ScenarioPicker } from '../components/command/BottomBar';
 import { BottomSheet, type Snap } from '../components/command/BottomSheet';
 import { MethodDrawer } from '../components/command/MethodDrawer';
 import { useMediaQuery } from '../components/command/useMediaQuery';
+import { DrillPanel } from '../components/sim/DrillPanel';
+import { EvacPanel } from '../components/sim/EvacPanel';
+import { DrillTimeline } from '../components/sim/DrillTimeline';
+import { useDrill } from '../sim/useDrill';
+import { FloodPainter } from '../sim/render';
+import { fmtClock, fmtLead, levelOf } from '../sim/flood';
+import type { DrillSnapshot } from '../copilot/drillTools';
+import { metres } from '../sim/graph';
+import type { DrillFit, DrillMap } from '../components/command/MapView';
+import { CROWD_CODE, crowdingOf } from '../sim/evac';
+import type { FeatureCollection, Point } from 'geojson';
 
 type AreaShape = Omit<DrawnArea, 'report' | 'facilities'>;
-type RightTab = 'insights' | 'ask';
+type RightTab = 'insights' | 'ask' | 'evac';
+export type AppMode = 'plan' | 'drill';
+
+/** "near Taman X" for a picked point: the closest named place within 1.5 km. */
+function nearestPlace(places: Place[], lon: number, lat: number): string | null {
+  let best: string | null = null, bestD = 1500;
+  for (const p of places) {
+    if (p.t !== 'neighborhood' && p.t !== 'macrohood' && p.t !== 'locality') continue;
+    const d = metres(lon, lat, p.c[0], p.c[1]);
+    if (d < bestD) { bestD = d; best = p.n; }
+  }
+  return best;
+}
 
 // Drawn-area reports, cached per polygon and grid (the grid object changes once,
 // when the terrain detail arrives), so adding an area doesn't recount the others.
@@ -48,6 +73,8 @@ function reportFor(grid: Grid, model: ModelSpec, items: Facility[], rings: Ring[
   reportCache.set(rings, entry);
   return entry;
 }
+
+const NO_SHELTERS: Shelter[] = [];
 
 const DEFAULT_LAYERS: LayerState = {
   susceptibility: true, showLow: false, history: false, sites: false, rivers: false, boundaries: true, built: false,
@@ -97,6 +124,9 @@ export const CommandCenter: FC = () => {
   const [briefing, setBriefing] = useState<number | null>(null);
   const nextAreaId = useRef(1);
   const isPhone = useMediaQuery('(max-width: 960px)');
+  const [appMode, setAppMode] = useState<AppMode>('plan');
+  const [lookahead, setLookahead] = useState(true);
+  const [shelterFit, setShelterFit] = useState<DrillFit | null>(null);
 
   // ── load: core first (map paints), terrain detail in the background ──────
   useEffect(() => {
@@ -117,6 +147,57 @@ export const CommandCenter: FC = () => {
     [bundle, detail],
   );
   const scenario = bundle?.model.scenarios.find(s => s.key === scenarioKey) ?? null;
+
+  // ── flood drill ──────────────────────────────────────────────────────────
+  const drill = useDrill(appMode === 'drill', bundle, grid);
+  const painter = useMemo(() => (bundle ? new FloodPainter(bundle.grid) : null), [bundle]);
+  const drillMinute = Math.floor(drill.t);
+  const frameKey = useMemo(() => {
+    if (!painter || !drill.sim) return 0;
+    painter.paint(drill.sim, drillMinute, lookahead);
+    return drill.sim.id * 1e6 + drillMinute * 2 + (lookahead ? 1 : 0);
+  }, [painter, drill.sim, drillMinute, lookahead]);
+  const crowdStep = Math.floor(drill.t / 5);
+  const crowdCodes = useMemo(() => {
+    const items = drill.data?.shelters.items ?? NO_SHELTERS;
+    return Uint8Array.from(items, (sh, i) => CROWD_CODE[crowdingOf(drill.plan, sh, i, crowdStep * 5)]);
+  }, [drill.data, drill.plan, crowdStep]);
+  const alertStep = Math.floor(drill.t / 3);
+  const drillAlerts: FeatureCollection<Point> = useMemo(() => {
+    const t = alertStep * 3;
+    return {
+      type: 'FeatureCollection',
+      features: drill.risks.filter(r => r.kind === 'place').flatMap(r => {
+        const level = levelOf(r.onset, t);
+        if (level < 2) return [];
+        return [{ type: 'Feature' as const, properties: { name: r.name, level, lead: level === 5 ? 'flooding now' : `flood ${fmtLead(r.onset - t)}` }, geometry: { type: 'Point' as const, coordinates: r.point } }];
+      }),
+    };
+  }, [drill.risks, alertStep]);
+  const drillRoutes: FeatureCollection = useMemo(() => {
+    const rs = drill.route?.ok ? drill.route.routes : [];
+    const pick = Math.min(drill.pick, Math.max(0, rs.length - 1));
+    return {
+      type: 'FeatureCollection',
+      features: rs.map((r, i) => ({ type: 'Feature' as const, properties: { chosen: i === pick ? 1 : 0 }, geometry: { type: 'LineString' as const, coordinates: r.path } }))
+        .sort((a, b) => a.properties.chosen - b.properties.chosen),
+    };
+  }, [drill.route, drill.pick]);
+  // the map flies to the rain area when a drill starts, and to a route when its start point changes
+  const rainFit: DrillFit | null = useMemo(() => {
+    const sim = drill.sim;
+    if (!sim || !bundle) return null;
+    const { meta } = bundle.grid;
+    const { r0, r1, c0, c1 } = sim.bounds;
+    return { bounds: [[meta.y1 - (r1 + 1) * meta.res, meta.x0 + c0 * meta.res], [meta.y1 - r0 * meta.res, meta.x0 + (c1 + 1) * meta.res]], token: `rain${sim.id}` };
+  }, [drill.sim, bundle]);
+  const routeFit: DrillFit | null = useMemo(() => {
+    const r = drill.route;
+    if (!drill.origin || !r?.ok) return null;
+    const path = r.routes[0].path;
+    const xs = path.map(p => p[0]), ys = path.map(p => p[1]);
+    return { bounds: [[Math.min(...ys), Math.min(...xs)], [Math.max(...ys), Math.max(...xs)]], token: `route${drill.origin.point.join(',')}:${drill.mode}` };
+  }, [drill.route, drill.origin, drill.mode]);
 
   // cell lists per daerah (and all of Selangor), built once
   const cellsByDaerah = useMemo(() => {
@@ -168,6 +249,11 @@ export const CommandCenter: FC = () => {
   };
 
   const onPick = (p: Place) => {
+    // in the drill, a searched neighbourhood or town becomes the start of an evacuation route
+    if (appMode === 'drill' && p.t !== 'daerah' && p.t !== 'federal territory') routeFrom(p.c[0], p.c[1], p.n);
+    else focusPlace(p);
+  };
+  const focusPlace = (p: Place) => {
     setFocus({ bounds: [[p.b[1], p.b[0]], [p.b[3], p.b[2]]], label: p.n, point: [p.c[1], p.c[0]], token: Date.now() });
     if (p.t === 'daerah' && bundle) {
       const d = bundle.stats.daerah.find(x => x.name === p.n);
@@ -176,6 +262,20 @@ export const CommandCenter: FC = () => {
   };
 
   const openAsk = () => { setAskFocus(t => t + 1); toAsk(); };
+
+  const switchMode = (m: AppMode) => {
+    setAppMode(m);
+    setDrawMode('none');
+    setCell(null);
+    if (m === 'drill') { if (isPhone) setSheetTab('drill'); else setRightTab('evac'); }
+    else { drill.setPlaying(false); if (isPhone) setSheetTab('overview'); else setRightTab('insights'); }
+  };
+  const routeFrom = (lon: number, lat: number, label?: string) => {
+    const near = bundle ? nearestPlace(bundle.places, lon, lat) : null;
+    drill.setOrigin({ point: [lon, lat], label: label ?? (near ? `near ${near}` : `${lat.toFixed(4)}, ${lon.toFixed(4)}`) });
+    drill.setShelter(null);
+    if (isPhone) { setSheetTab('evac'); setSnap('half'); } else setRightTab('evac');
+  };
 
   const locate = () => {
     if (!navigator.geolocation) { setNotice('This browser cannot share its location.'); return; }
@@ -188,6 +288,7 @@ export const CommandCenter: FC = () => {
         return;
       }
       setNotice('Showing your location. It stays on this device unless you ask Ginkgo about it.');
+      if (appMode === 'drill') { routeFrom(lon, lat, 'Your location'); return; }
       setInspect({ lat, lon, title: 'Your location', me: true, token: Date.now() });
     }, err => {
       setLocating(false);
@@ -203,7 +304,9 @@ export const CommandCenter: FC = () => {
   // ── AI agent: tools run here, over the same grid the panels use ─────────
   const view = useRef<AgentView>({ scenario: 'normal', selectedDaerah: null, activeArea: null, lastCell: null, layers: visibleLayers(DEFAULT_LAYERS) });
   const session = useRef<AgentSession | null>(null);
+  const drillNow = useRef<DrillSnapshot>({ active: false, sim: null, t: 0, plan: null, data: null });
   useLayoutEffect(() => {
+    drillNow.current = { active: appMode === 'drill', sim: drill.sim, t: drill.t, plan: drill.plan, data: drill.data };
     view.current = {
       scenario: scenarioKey,
       selectedDaerah: daerahName,
@@ -257,8 +360,22 @@ export const CommandCenter: FC = () => {
             showSites(list, label, sc?.label ?? 'the chosen scenario');
           },
         },
+        getDrill: () => drillNow.current,
+        setDrill: d => { drillNow.current = d; },
+        drillActions: {
+          startDrill: (id, intensity, minute) => {
+            if (appMode !== 'drill') switchMode('drill');
+            drill.startAt(id, intensity, minute);
+          },
+          routeFrom: (lon, lat, label, mode) => { drill.setMode(mode); routeFrom(lon, lat, label); },
+        },
       },
-      context: {
+      context: appMode === 'drill' ? {
+        mode: 'flood drill (simulation)',
+        drill_event: drill.event.label,
+        drill_clock: fmtClock(drill.t),
+        route_start: drill.origin?.label ?? null,
+      } : {
         scenario: scenarioKey,
         selected_daerah: daerahName,
         active_drawn_area: area?.label ?? null,
@@ -301,7 +418,7 @@ export const CommandCenter: FC = () => {
     return (
       <div className="map-loading" style={{ position: 'fixed' }}>
         <div style={{ textAlign: 'center' }}>
-          <div className="brand-logo" style={{ justifyContent: 'center', marginBottom: 10 }}><div className="brand-icon">G</div><span>GINKGO</span></div>
+          <div className="brand-logo" style={{ justifyContent: 'center', marginBottom: 10 }}><GinkgoMark size={34} /><span>GINKGO</span></div>
           Loading Selangor layers…
         </div>
       </div>
@@ -338,6 +455,22 @@ export const CommandCenter: FC = () => {
     }).finally(() => setBriefing(null));
   };
 
+  const inDrill = appMode === 'drill';
+  const chosenShelter = drill.route?.ok ? drill.route.routes[Math.min(drill.pick, drill.route.routes.length - 1)].shelter : null;
+  const drillMap: DrillMap | null = inDrill ? {
+    frame: painter?.canvas ?? null, frameKey,
+    shelters: drill.data?.shelters.items ?? NO_SHELTERS, crowd: drill.crowding, occupancy: drill.occupancy, crowdCodes,
+    alerts: drillAlerts, routes: drillRoutes, origin: drill.origin,
+    selectedShelter: drill.shelter ?? chosenShelter,
+    fits: [rainFit, routeFit, shelterFit].filter((f): f is DrillFit => f !== null),
+  } : null;
+  const showShelter = (sh: Shelter) => {
+    drill.setShelter(sh.id);
+    setShelterFit({ bounds: [[sh.c[1] - 0.004, sh.c[0] - 0.004], [sh.c[1] + 0.004, sh.c[0] + 0.004]], token: `sh${sh.id}:${Date.now()}` });
+    if (isPhone) { setSheetTab('evac'); setSnap('half'); } else setRightTab('evac');
+  };
+  const drillReport = () => askAbout('Give me a situation report on the flood drill: where is flooding now, which neighbourhoods must evacuate within the hour, and how full are the evacuation centres?');
+
   const mapBlock = (
     <main className="cc-map">
       <MapView
@@ -358,6 +491,9 @@ export const CommandCenter: FC = () => {
           if (isPhone) { setSheetTab('ask'); setSnap('half'); } else setRightTab('ask');
         }}
         onBasemapError={msg => { setNotice(msg); setBasemap('streets'); }}
+        drill={drillMap}
+        onDrillPick={routeFrom}
+        onShelterPick={id => drill.data && showShelter(drill.data.shelters.items[id])}
       />
       <MapChrome
         places={bundle.places} scenario={scenario} layers={layers} onLayers={setLayers}
@@ -367,8 +503,24 @@ export const CommandCenter: FC = () => {
         aiMode={agent.mode} aiBusy={agent.busy}
         onReset={() => { setResetToken(t => t + 1); setSelected(null); setActiveArea(null); setCell(null); setSites(null); }}
         notice={notice} onDismissNotice={() => setNotice(null)}
+        drill={inDrill}
       />
     </main>
+  );
+
+  const drillPanel = (
+    <DrillPanel drill={drill} aiMode={agent.mode} onAsk={drillReport}
+      onRoute={r => routeFrom(r.point[0], r.point[1], r.name)}
+      onShow={r => setFocus({ bounds: [[r.point[1] - 0.004, r.point[0] - 0.004], [r.point[1] + 0.004, r.point[0] + 0.004]], label: r.name, point: [r.point[1], r.point[0]], token: Date.now() })} />
+  );
+  const evacPanel = (
+    <EvacPanel drill={drill} onShowShelter={showShelter} onLocate={locate} locating={locating} onAsk={q => askAbout(q)} aiMode={agent.mode} />
+  );
+  const drillBottom = (
+    <footer className="cc-bottom drill-bottom">
+      <DrillTimeline drill={drill} />
+      <label className="look-toggle"><input type="checkbox" checked={lookahead} onChange={e => setLookahead(e.target.checked)} /> 3-hour look-ahead</label>
+    </footer>
   );
 
   const daerahPanel = (
@@ -438,17 +590,29 @@ export const CommandCenter: FC = () => {
       <div className="cc phone">
         {mapBlock}
         <BottomSheet
-          tabs={[{ key: 'overview', label: daerahName ?? 'Selangor' }, { key: 'area', label: area ? area.label : 'Area & ranking' }, { key: 'ask', label: '✦ Ask' }]}
+          tabs={inDrill
+            ? [{ key: 'drill', label: 'Flood drill' }, { key: 'evac', label: 'Evacuate' }, { key: 'ask', label: '✦ Ask' }]
+            : [{ key: 'overview', label: daerahName ?? 'Selangor' }, { key: 'area', label: area ? area.label : 'Area & ranking' }, { key: 'ask', label: '✦ Ask' }]}
           active={sheetTab} onTab={setSheetTab} snap={snap} onSnap={setSnap}
           header={(
             <div className="sheet-head-row">
-              <ScenarioPicker model={bundle.model} scenario={scenarioKey} onScenario={setScenarioKey} />
-              <button className="btn btn-ghost btn-sm" onClick={() => setMethodOpen(true)}>Method</button>
+              <ModeSwitch mode={appMode} onMode={switchMode} />
+              {inDrill ? <DrillTimeline drill={drill} compact /> : <ScenarioPicker model={bundle.model} scenario={scenarioKey} onScenario={setScenarioKey} />}
+              {!inDrill && <button className="btn btn-ghost btn-sm" onClick={() => setMethodOpen(true)}>Method</button>}
             </div>
           )}
         >
-          <div hidden={sheetTab !== 'overview'}>{daerahPanel}</div>
-          <div hidden={sheetTab !== 'area'}>{areaPanel}</div>
+          {inDrill ? (
+            <>
+              <div hidden={sheetTab !== 'drill'}>{drillPanel}</div>
+              <div hidden={sheetTab !== 'evac'}>{evacPanel}</div>
+            </>
+          ) : (
+            <>
+              <div hidden={sheetTab !== 'overview'}>{daerahPanel}</div>
+              <div hidden={sheetTab !== 'area'}>{areaPanel}</div>
+            </>
+          )}
           <div hidden={sheetTab !== 'ask'}>{copilot('dock')}</div>
         </BottomSheet>
         {method}
@@ -459,25 +623,36 @@ export const CommandCenter: FC = () => {
   return (
     <div className="cc">
       <TopBar scenario={scenario} subjectLabel={subjectLabel} onOpenMethod={() => setMethodOpen(true)}
-        aiMode={agent.mode} aiModel={agent.model} aiProvider={agent.provider} totals={agent.totals} />
+        aiMode={agent.mode} aiModel={agent.model} aiProvider={agent.provider} totals={agent.totals}
+        mode={appMode} onMode={switchMode} drillLabel={inDrill ? drill.event.label : null} />
       <div className="cc-main">
-        {daerahPanel}
+        {inDrill ? drillPanel : daerahPanel}
         {mapBlock}
         <aside className="cc-panel right" aria-label="Insights and Ask Ginkgo">
           <div className="panel-tabs" role="tablist" aria-label="Right panel">
+            {inDrill ? (
+              <button role="tab" aria-selected={rightTab === 'evac' || rightTab === 'insights'} onClick={() => setRightTab('evac')}>
+                Evacuate{drill.origin && <span className="tab-count">1</span>}
+              </button>
+            ) : (
             <button role="tab" aria-selected={rightTab === 'insights'} onClick={() => setRightTab('insights')}>
               Insights{(area || sites) && <span className="tab-count">{(area ? 1 : 0) + (sites ? 1 : 0)}</span>}
             </button>
+            )}
             <button role="tab" aria-selected={rightTab === 'ask'} onClick={() => { setRightTab('ask'); setAskFocus(t => t + 1); }}>
               <span className="spark" aria-hidden>✦</span> Ask Ginkgo{agent.busy && <span className="tab-busy" aria-label="working" />}
             </button>
           </div>
-          <div className="panel-pane scroll" hidden={rightTab !== 'insights'}>{areaPanel}</div>
+          {inDrill
+            ? <div className="panel-pane scroll" hidden={rightTab === 'ask'}>{evacPanel}</div>
+            : <div className="panel-pane scroll" hidden={rightTab !== 'insights'}>{areaPanel}</div>}
           <div className="panel-pane fill" hidden={rightTab !== 'ask'}>{copilot('full')}</div>
         </aside>
       </div>
-      <BottomBar model={bundle.model} scenario={scenarioKey} onScenario={setScenarioKey}
-        built={bundle.stats.built} detailReady={detailReady} />
+      {inDrill ? drillBottom : (
+        <BottomBar model={bundle.model} scenario={scenarioKey} onScenario={setScenarioKey}
+          built={bundle.stats.built} detailReady={detailReady} />
+      )}
       {method}
     </div>
   );

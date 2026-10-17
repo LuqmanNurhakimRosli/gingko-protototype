@@ -4,6 +4,9 @@
 
 import { useState, type FC } from 'react';
 import { BUILT_RGB, HISTORY_RGB, RISK_COLOR, RIVER_COLOR, SAFE_RGB } from '../../data/format';
+import { LEVELS } from '../../sim/flood';
+import { CROWDING } from '../../sim/evac';
+import { GinkgoMark } from '../brand/GinkgoMark';
 import type { Place, Scenario } from '../../data/types';
 import type { Basemap, DrawMode, LayerState } from './MapView';
 import { PlaceSearch } from './PlaceSearch';
@@ -34,6 +37,8 @@ interface Props {
   onReset: () => void;
   notice: string | null;
   onDismissNotice: () => void;
+  /** flood drill: a drill legend replaces the susceptibility one; no drawing tools */
+  drill?: boolean;
 }
 
 const CHIPS: { key: keyof LayerState; label: string; icon: string; needsDetail?: boolean }[] = [
@@ -80,7 +85,7 @@ export const MapChrome: FC<Props> = (p) => {
           onPick={p.onPick}
           onAsk={p.onAskText}
           placeholder={p.aiMode === 'ai' ? 'Search a place or ask Ginkgo' : 'Search Selangor'}
-          leading={<span className="gm-brand" aria-hidden>G</span>}
+          leading={<span className="gm-brand" aria-hidden><GinkgoMark size={24} /></span>}
           trailing={<button className={`gm-ask-btn${p.aiBusy ? ' busy' : ''}`} onClick={p.onAsk} aria-label="Ask Ginkgo" title="Ask Ginkgo">✦</button>}
         />
         <div className="gm-chips" role="toolbar" aria-label="Quick layers">
@@ -93,10 +98,14 @@ export const MapChrome: FC<Props> = (p) => {
               <span aria-hidden>{c.icon}</span> {c.label}
             </button>
           ))}
-          <span className="gm-chip-sep" aria-hidden />
-          <button className="gm-chip" aria-pressed={p.drawMode === 'rect'} onClick={() => p.onDrawMode(p.drawMode === 'rect' ? 'none' : 'rect')}>▭ Rectangle</button>
-          <button className="gm-chip" aria-pressed={p.drawMode === 'poly'} onClick={() => p.onDrawMode(p.drawMode === 'poly' ? 'none' : 'poly')}>⬠ Polygon</button>
-          {p.hasArea && <button className="gm-chip" onClick={p.onClearArea}>✕ Clear area</button>}
+          {!p.drill && (
+            <>
+              <span className="gm-chip-sep" aria-hidden />
+              <button className="gm-chip" aria-pressed={p.drawMode === 'rect'} onClick={() => p.onDrawMode(p.drawMode === 'rect' ? 'none' : 'rect')}>▭ Rectangle</button>
+              <button className="gm-chip" aria-pressed={p.drawMode === 'poly'} onClick={() => p.onDrawMode(p.drawMode === 'poly' ? 'none' : 'poly')}>⬠ Polygon</button>
+              {p.hasArea && <button className="gm-chip" onClick={p.onClearArea}>✕ Clear area</button>}
+            </>
+          )}
         </div>
       </div>
 
@@ -160,6 +169,27 @@ export const MapChrome: FC<Props> = (p) => {
         </div>
       )}
 
+      {p.drill ? (
+        <div className={`map-legend${legendOpen ? '' : ' closed'}`} aria-label="Map legend">
+          <button className="legend-toggle" onClick={() => setLegendOpen(v => !v)} aria-expanded={legendOpen}>
+            <strong>Flood drill · simulation</strong><span aria-hidden>{legendOpen ? '▾' : '▸'}</span>
+          </button>
+          {legendOpen && (
+            <>
+              <div className="row"><i style={{ background: 'linear-gradient(90deg,#82BEFA 33%,#3884EC 33% 66%,#1446AA 66%)' }} />Water now · &lt;0.5 · 0.5–1.5 · &gt;1.5 m (indicative)</div>
+              {([4, 3, 2] as const).map(l => (
+                <div className="row" key={l}><i style={{ background: LEVELS[l].color, opacity: 0.8 }} />Floods {LEVELS[l].lead} · {LEVELS[l].name.split(' · ')[1]}</div>
+              ))}
+              <div className="row"><i className="dot" style={{ background: LEVELS[5].color }} />Neighbourhood alert (colour = level)</div>
+              <div className="row legend-crowd">
+                {(['open', 'busy', 'crowded', 'full'] as const).map(c => <i key={c} className="dot" style={{ background: CROWDING[c].color }} title={CROWDING[c].label} />)}
+                Evacuation centre: space · filling · crowded · full
+              </div>
+              <div className="row"><i className="line" style={{ background: '#1A73E8', height: 4 }} />Evacuation route</div>
+            </>
+          )}
+        </div>
+      ) : (
       <div className={`map-legend${legendOpen ? '' : ' closed'}`} aria-label="Map legend">
         <button className="legend-toggle" onClick={() => setLegendOpen(v => !v)} aria-expanded={legendOpen}>
           <strong>Flood susceptibility · {p.scenario.label}</strong><span aria-hidden>{legendOpen ? '▾' : '▸'}</span>
@@ -180,6 +210,7 @@ export const MapChrome: FC<Props> = (p) => {
           </>
         )}
       </div>
+      )}
     </>
   );
 };
