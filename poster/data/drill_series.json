@@ -1,0 +1,160 @@
+{
+ "event": "Klang Valley monsoon storm",
+ "intensity": "Extreme 120 mm/hr",
+ "rows": [
+  {
+   "minute": 0,
+   "clock": "T+0:00",
+   "flooded": 0,
+   "within1h": 136000,
+   "inCentres": 0,
+   "noCentre": 106000,
+   "raw": {
+    "Living in flooded cells0 km² under water": "0",
+    "Flooding within 1 hpeople · Level 4, eva": "136K",
+    "In evacuation centresof 331K places in t": "0",
+    "No centre within reachneed transport, re": "106K"
+   }
+  },
+  {
+   "minute": 30,
+   "clock": "T+0:30",
+   "flooded": 0,
+   "within1h": 307000,
+   "inCentres": 43000,
+   "noCentre": 128000,
+   "raw": {
+    "Living in flooded cells0 km² under water": "0",
+    "Flooding within 1 hpeople · Level 4, eva": "307K",
+    "In evacuation centresof 331K places in t": "43K",
+    "No centre within reachneed transport, re": "128K"
+   }
+  },
+  {
+   "minute": 60,
+   "clock": "T+1:00",
+   "flooded": 136000,
+   "within1h": 377000,
+   "inCentres": 79000,
+   "noCentre": 165000,
+   "raw": {
+    "Living in flooded cells144 km² under wat": "136K",
+    "Flooding within 1 hpeople · Level 4, eva": "377K",
+    "In evacuation centresof 331K places in t": "79K",
+    "No centre within reachneed transport, re": "165K"
+   }
+  },
+  {
+   "minute": 90,
+   "clock": "T+1:30",
+   "flooded": 307000,
+   "within1h": 497000,
+   "inCentres": 101000,
+   "noCentre": 180000,
+   "raw": {
+    "Living in flooded cells254 km² under wat": "307K",
+    "Flooding within 1 hpeople · Level 4, eva": "497K",
+    "In evacuation centresof 331K places in t": "101K",
+    "No centre within reachneed transport, re": "180K"
+   }
+  },
+  {
+   "minute": 120,
+   "clock": "T+2:00",
+   "flooded": 513000,
+   "within1h": 585000,
+   "inCentres": 120000,
+   "noCentre": 201000,
+   "raw": {
+    "Living in flooded cells374 km² under wat": "513K",
+    "Flooding within 1 hpeople · Level 4, eva": "585K",
+    "In evacuation centresof 331K places in t": "120K",
+    "No centre within reachneed transport, re": "201K"
+   }
+  },
+  {
+   "minute": 150,
+   "clock": "T+2:30",
+   "flooded": 804000,
+   "within1h": 587000,
+   "inCentres": 126000,
+   "noCentre": 203000,
+   "raw": {
+    "Living in flooded cells537 km² under wat": "804K",
+    "Flooding within 1 hpeople · Level 4, eva": "587K",
+    "In evacuation centresof 331K places in t": "126K",
+    "No centre within reachneed transport, re": "203K"
+   }
+  },
+  {
+   "minute": 180,
+   "clock": "T+3:00",
+   "flooded": 1100000,
+   "within1h": 633000,
+   "inCentres": 132000,
+   "noCentre": 206000,
+   "raw": {
+    "Living in flooded cells715 km² under wat": "1.10M",
+    "Flooding within 1 hpeople · Level 4, eva": "633K",
+    "In evacuation centresof 331K places in t": "132K",
+    "No centre within reachneed transport, re": "206K"
+   }
+  },
+  {
+   "minute": 210,
+   "clock": "T+3:30",
+   "flooded": 1390000,
+   "within1h": 623000,
+   "inCentres": 136000,
+   "noCentre": 206000,
+   "raw": {
+    "Living in flooded cells898 km² under wat": "1.39M",
+    "Flooding within 1 hpeople · Level 4, eva": "623K",
+    "In evacuation centresof 331K places in t": "136K",
+    "No centre within reachneed transport, re": "206K"
+   }
+  },
+  {
+   "minute": 240,
+   "clock": "T+4:00",
+   "flooded": 1730000,
+   "within1h": 583000,
+   "inCentres": 138000,
+   "noCentre": 206000,
+   "raw": {
+    "Living in flooded cells1082 km² under wa": "1.73M",
+    "Flooding within 1 hpeople · Level 4, eva": "583K",
+    "In evacuation centresof 331K places in t": "138K",
+    "No centre within reachneed transport, re": "206K"
+   }
+  },
+  {
+   "minute": 270,
+   "clock": "T+4:30",
+   "flooded": 2009999.9999999998,
+   "within1h": 301000,
+   "inCentres": 140000,
+   "noCentre": 206000,
+   "raw": {
+    "Living in flooded cells1246 km² under wa": "2.01M",
+    "Flooding within 1 hpeople · Level 4, eva": "301K",
+    "In evacuation centresof 331K places in t": "140K",
+    "No centre within reachneed transport, re": "206K"
+   }
+  },
+  {
+   "minute": 300,
+   "clock": "T+5:00",
+   "flooded": 2310000,
+   "within1h": 0,
+   "inCentres": 141000,
+   "noCentre": 206000,
+   "raw": {
+    "Living in flooded cells1425 km² under wa": "2.31M",
+    "Flooding within 1 hpeople · Level 4, eva": "0",
+    "In evacuation centresof 331K places in t": "141K",
+    "No centre within reachneed transport, re": "206K"
+   }
+  }
+ ]
+}

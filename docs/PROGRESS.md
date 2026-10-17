@@ -30,6 +30,7 @@ Legend: ✅ done · 🟡 in progress / waiting · ⬜ planned · ⚠️ known is
 | Reference systems write-up (Japan, Singapore, Malaysia) | ✅ | `REFERENCES.md` |
 | 3D sketch model — Taman Sri Muda | ✅ | with drill water and route |
 | 3-minute pitch video | ✅ | 2:59, 1920×1080, built from the founder's recordings + real app footage, motion graphics, original music and synthesised sound effects (`demo/pitch/`, `npm run pitch:build`); the render stays local (git-ignored) |
+| URBIEE 2026 poster (`poster/`) | ✅ | updated to the current system: new logo, text, two native charts from the app's own numbers, three screenshots; `python poster/build_poster.py` rebuilds it from the original template copy; the .pptx/.pdf are local (not committed) |
 | System guide and this tracker | ✅ | `SYSTEM_GUIDE.md`, `PROGRESS.md` |
 | Merge the branch into `main` | ✅ | fast-forward, 2026-10-17 |
 | Pitch demo capture script (`demo/pitch/capture.mjs`) | ✅ | runs on a laptop GPU (s1 map · s2–s4 drill · s5 3D · s6 AI); fixed: evaluate returning the Map object (7 s/frame), drill 'idle' never firing, 3D at 1.5× pixels crashing the GPU |
