@@ -1,0 +1,712 @@
+<!doctype html>
+<!--
+  Ginkgo pitch film: the motion-graphics composition. Every frame is a pure function of time,
+  window.renderAt(t), screenshotted by render.mjs. Timing comes from work/edl.json (the edit, with every
+  caption word's output time), so graphics land on the spoken word. The same timeline exports the sound
+  cues (window.CUES) that mix.py turns into effects.
+  Served by render.mjs:  /w/ → demo/pitch/work · /brand/ → demo/pitch/assets/logos · /logo.svg · /config.json
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ginkgo pitch film</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --green: #08A045; --green-d: #05753A; --water: #3884EC; --paper: #F3F0E8; --ink: #111111;
+    --l5: #0C000C; --l4: #AA00AA; --l3: #FF2800; --l2: #F2E700;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: #000; font-family: Inter, sans-serif; color: var(--ink); }
+  .layer { position: absolute; inset: 0; }
+  .abs { position: absolute; }
+  img { display: block; }
+
+  /* on camera */
+  #faceWrap { overflow: hidden; }
+  #face { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 960px 540px;
+          filter: brightness(1.07) contrast(1.06) saturate(1.1); }
+  #warm { background: radial-gradient(120% 90% at 35% 40%, rgba(255,190,120,.10), rgba(0,0,0,0) 60%),
+          radial-gradient(140% 120% at 50% 50%, rgba(0,0,0,0) 55%, rgba(0,0,0,.38)); }
+
+  /* cold open */
+  #cold img { position: absolute; inset: 0; width: 1920px; height: 1080px; transform-origin: 1156px 500px; filter: brightness(.78) saturate(.85) contrast(1.05); }
+  #coldTint { background: linear-gradient(180deg, rgba(10,30,60,.45), rgba(10,30,60,.15) 45%, rgba(10,20,40,.55)); }
+  #rain { position: absolute; inset: 0; }
+  #coldTitle { left: 96px; top: 92px; color: #fff; font-weight: 800; font-size: 64px; letter-spacing: -1px; text-shadow: 0 2px 24px rgba(0,0,0,.35); white-space: pre; }
+  #coldTitle .caret { display: inline-block; width: 4px; height: 58px; background: #fff; margin-left: 6px; vertical-align: -6px; }
+  #coldSmall { left: 96px; top: 186px; color: rgba(255,255,255,.88); font-size: 22px; font-weight: 500; letter-spacing: .2px;
+               padding: 8px 14px; border-left: 3px solid var(--water); background: rgba(0,0,0,.25); }
+
+  /* logo sting + corner bug */
+  #sting { background: var(--paper); }
+  #leafBig { position: absolute; left: 50%; top: 50%; width: 260px; height: 260px; margin: -170px 0 0 -130px; }
+  #wordBig { position: absolute; left: 0; right: 0; top: 640px; text-align: center; font-size: 72px; font-weight: 800; letter-spacing: -1.5px; color: var(--ink); }
+  #wordBig span { color: var(--green); }
+  #bug { position: absolute; display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 10px; border-radius: 999px;
+         background: rgba(255,255,255,.82); backdrop-filter: blur(10px); box-shadow: 0 6px 24px rgba(0,0,0,.12); font-weight: 800; font-size: 22px; letter-spacing: -.3px; }
+  #bug img { width: 34px; height: 34px; }
+
+  /* lower third */
+  #lower { left: 96px; top: 812px; height: 112px; display: flex; overflow: hidden; }
+  #lower .bar { width: 10px; background: var(--green); border-radius: 3px; }
+  #lower .txt { padding: 14px 26px 14px 22px; background: rgba(255,255,255,.92); backdrop-filter: blur(10px); border-radius: 0 14px 14px 0; box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+  #lower b { display: block; font-size: 42px; font-weight: 800; letter-spacing: -.8px; line-height: 1.1; }
+  #lower i { display: block; font-style: normal; font-size: 24px; color: #444; font-weight: 500; margin-top: 4px; }
+
+  /* right-third panel (problems, icons, tagline) */
+  .glass { background: rgba(255,255,255,.88); backdrop-filter: blur(16px); border-radius: 22px; box-shadow: 0 18px 50px rgba(0,0,0,.18); border: 1px solid rgba(255,255,255,.7); }
+  #panel { left: 1196px; top: 150px; width: 640px; }
+  #chips { display: flex; gap: 14px; margin: 0 0 18px 6px; }
+  .chip { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 30px;
+          background: rgba(255,255,255,.85); color: #999; box-shadow: 0 6px 18px rgba(0,0,0,.14); }
+  .chip.on { background: var(--green); color: #fff; }
+  .chip.done { background: #fff; color: var(--green); }
+  .prob { position: absolute; left: 0; top: 82px; width: 640px; padding: 30px 34px 30px; }
+  .prob h3 { font-size: 38px; font-weight: 800; letter-spacing: -.8px; line-height: 1.12; margin-bottom: 18px; }
+  .stat { padding: 18px 0 16px; border-top: 1px solid rgba(0,0,0,.08); overflow: hidden; }
+  .stat .n { font-size: 76px; font-weight: 800; letter-spacing: -2.5px; line-height: 1; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 25px; font-weight: 600; color: #222; margin-top: 6px; line-height: 1.25; }
+  .stat .s { font-size: 17px; color: #777; margin-top: 6px; font-weight: 500; }
+  .stat .n.red { color: #D93025; } .stat .n.purple { color: var(--l4); } .stat .n.blue { color: #1A73E8; }
+  .ask { display: inline-flex; align-items: center; gap: 12px; margin: 10px 12px 0 0; padding: 14px 22px; border-radius: 999px;
+         background: #fff; border: 2px solid rgba(0,0,0,.08); font-size: 30px; font-weight: 700; }
+  .ask i { font-style: normal; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--l4); color: #fff; font-size: 22px; }
+
+  #icons { left: 1236px; top: 230px; width: 600px; }
+  .icon { display: flex; align-items: center; gap: 22px; padding: 22px 26px; margin-bottom: 18px; }
+  .icon .ic { width: 84px; height: 84px; border-radius: 22px; display: grid; place-items: center; flex: none; }
+  .icon b { display: block; font-size: 44px; font-weight: 800; letter-spacing: -1px; }
+  .icon span { display: block; font-size: 23px; color: #555; font-weight: 500; margin-top: 2px; }
+
+  /* cutaway card: Japan · Singapore */
+  #cities { background: var(--paper); }
+  #cities h2 { position: absolute; left: 0; right: 0; top: 150px; text-align: center; font-size: 56px; font-weight: 800; letter-spacing: -1.4px; }
+  .city { position: absolute; top: 300px; width: 700px; padding: 46px 50px; }
+  .city .flag { width: 70px; height: 46px; border-radius: 6px; margin-bottom: 22px; box-shadow: 0 0 0 1px rgba(0,0,0,.1); }
+  .city h4 { font-size: 52px; font-weight: 800; letter-spacing: -1.2px; margin-bottom: 18px; }
+  .city p { font-size: 34px; font-weight: 600; line-height: 1.5; color: #222; display: flex; align-items: center; gap: 14px; }
+  .city p em { font-style: normal; width: 14px; height: 14px; border-radius: 50%; display: inline-block; flex: none; }
+  #citiesSrc { position: absolute; left: 0; right: 0; top: 820px; text-align: center; font-size: 19px; color: #777; }
+
+  /* demo: browser window */
+  #stage { background: radial-gradient(90% 80% at 70% 0%, rgba(8,160,69,.10), rgba(0,0,0,0) 60%), var(--paper); }
+  #stage::after { content: ''; position: absolute; inset: 0; opacity: .5;
+    background-image: linear-gradient(rgba(0,0,0,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,.035) 1px, transparent 1px); background-size: 48px 48px; }
+  #win { position: absolute; left: 110px; top: 22px; width: 1700px; border-radius: 16px; overflow: hidden; background: #fff;
+         box-shadow: 0 40px 90px rgba(0,0,0,.28), 0 0 0 1px rgba(0,0,0,.08); transform-origin: 50% 50%; z-index: 2; }
+  #bar { height: 38px; background: #ECEAE4; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid rgba(0,0,0,.07); }
+  #bar i { width: 13px; height: 13px; border-radius: 50%; display: block; }
+  #url { margin-left: 18px; height: 24px; flex: 0 0 520px; border-radius: 8px; background: #fff; font-size: 14px; color: #555; display: flex; align-items: center; padding: 0 12px; gap: 8px; }
+  #vp { position: relative; width: 1700px; height: 956px; overflow: hidden; background: #fff; }
+  #app { position: absolute; left: 0; top: 0; width: 1700px; height: 956.25px; transform-origin: 0 0; }
+  #ov { position: absolute; inset: 0; pointer-events: none; }
+  .ring { position: absolute; border-radius: 16px; border: 4px solid var(--green); box-shadow: 0 0 0 6px rgba(8,160,69,.18); }
+  .label { position: absolute; padding: 12px 20px 12px 16px; border-radius: 14px; background: #111; color: #fff; font-size: 26px; font-weight: 700;
+           white-space: nowrap; display: flex; align-items: center; gap: 12px; box-shadow: 0 14px 34px rgba(0,0,0,.3); }
+  .label em { font-style: normal; width: 14px; height: 14px; border-radius: 50%; background: var(--green); flex: none; }
+  .ripple { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; border: 4px solid var(--green); }
+  #cursor { position: absolute; width: 34px; height: 34px; filter: drop-shadow(0 3px 5px rgba(0,0,0,.35)); }
+  #alertChip { position: absolute; padding: 12px 20px; border-radius: 12px; background: var(--l4); color: #fff; font-weight: 800; font-size: 26px;
+               display: flex; gap: 12px; align-items: center; box-shadow: 0 14px 34px rgba(170,0,170,.35); white-space: nowrap; }
+  #alertChip small { font-weight: 600; font-size: 20px; opacity: .9; }
+  #chapters { position: absolute; left: 110px; width: 1700px; top: 1024px; height: 40px; display: flex; gap: 8px; z-index: 3; }
+  .chap { flex: 1; position: relative; height: 40px; border-radius: 10px; background: rgba(0,0,0,.06); overflow: hidden; font-size: 17px; font-weight: 700; color: #777; }
+  .chap .fill { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(8,160,69,.16); }
+  .chap span { position: absolute; left: 14px; top: 10px; }
+  .chap.on { color: #111; } .chap.on .fill { background: rgba(8,160,69,.28); }
+
+  /* tagline + reach (part C) */
+  #tag { left: 1196px; top: 250px; width: 640px; padding: 38px 40px; }
+  #tag div { font-size: 58px; font-weight: 800; letter-spacing: -1.6px; line-height: 1.12; }
+  #tag div + div { color: var(--green); }
+  #reach { left: 1196px; top: 560px; width: 640px; display: flex; flex-wrap: wrap; gap: 12px; }
+  #reach span { padding: 12px 22px; border-radius: 999px; background: rgba(255,255,255,.92); font-size: 28px; font-weight: 700; box-shadow: 0 8px 22px rgba(0,0,0,.14); }
+  #reach span.first { background: var(--green); color: #fff; }
+
+  /* closing scene */
+  #end { background: var(--paper); }
+  #logos { position: absolute; left: 0; right: 0; top: 300px; display: flex; justify-content: center; align-items: center; gap: 90px; }
+  #logos .sep { width: 2px; height: 120px; background: rgba(0,0,0,.12); }
+  #gk { display: flex; align-items: center; gap: 18px; font-size: 64px; font-weight: 800; letter-spacing: -1.6px; }
+  #gk img { width: 120px; height: 120px; }
+  #endTag { position: absolute; left: 0; right: 0; top: 560px; text-align: center; font-size: 60px; font-weight: 800; letter-spacing: -1.5px; }
+  #endTag span { color: var(--green); }
+  #endSmall { position: absolute; left: 240px; right: 240px; top: 780px; text-align: center; font-size: 19px; line-height: 1.7; color: #666; }
+  #black { background: #000; }
+
+  /* captions */
+  #cap { position: absolute; left: 0; right: 0; display: flex; justify-content: center; z-index: 9; }
+  #cap div { max-width: 1240px; padding: 10px 24px 12px; border-radius: 14px; background: rgba(12,12,12,.72); color: #fff; text-align: center;
+             font-size: 38px; font-weight: 600; line-height: 1.28; letter-spacing: -.2px; }
+</style>
+</head>
+<body>
+<!-- cold open -->
+<div id="cold" class="layer"><img id="coldImg" alt=""><div id="coldTint" class="layer"></div><canvas id="rain" width="1920" height="1080"></canvas>
+  <div id="coldTitle" class="abs"></div><div id="coldSmall" class="abs">Simulation of a December-2021-style storm · Ginkgo flood drill</div></div>
+
+<!-- on camera -->
+<div id="faceWrap" class="layer"><img id="face" alt=""><div id="warm" class="layer"></div></div>
+
+<div id="lower" class="abs"><div class="bar"></div><div class="txt"><b id="lowerName"></b><i id="lowerSub"></i></div></div>
+
+<div id="panel" class="abs">
+  <div id="chips"><div class="chip">1</div><div class="chip">2</div><div class="chip">3</div></div>
+  <div class="prob glass" id="p1"><h3>Flood maps are made for experts</h3>
+    <div class="stat" id="st1"><div class="n red" data-to="24.1" data-fmt="pct">24.1%</div><div class="l">of Selangor's land is High flood susceptibility</div><div class="s">Ginkgo analysis · Normal rain</div></div>
+    <div class="stat" id="st2"><div class="n red" data-to="1.9" data-fmt="mil">~1.9 million</div><div class="l">people live in High cells</div><div class="s">Estimate · Census 2020 × Meta HRSL</div></div></div>
+  <div class="prob glass" id="p2"><h3>Warnings are too broad</h3>
+    <div class="ask" id="q1"><i>?</i>When to leave</div><div class="ask" id="q2"><i>?</i>Where to go</div></div>
+  <div class="prob glass" id="p3"><h3>Centres fill up unseen</h3>
+    <div class="stat" id="st3"><div class="n purple" data-to="15404" data-fmt="int">15,404</div><div class="l">people in 83 evacuation centres in Selangor</div><div class="s">26 December 2021 · news reports</div></div></div>
+</div>
+
+<div id="icons" class="abs">
+  <div class="icon glass" id="i1"><div class="ic" style="background:#E7F6EC"><svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="#08A045" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg></div><div><b>Map</b><span>the risk, street by street</span></div></div>
+  <div class="icon glass" id="i2"><div class="ic" style="background:#E8F0FD"><svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="#1A73E8" stroke-width="2.2" stroke-linecap="round"><path d="M2 15c2.5-2 4.5-2 7 0s4.5 2 7 0 4.5-2 6 0"/><path d="M2 20c2.5-2 4.5-2 7 0s4.5 2 7 0 4.5-2 6 0"/><circle cx="12" cy="7" r="4.2"/><path d="M12 5v2.2l1.5 1"/></svg></div><div><b>Drill</b><span>a flood, hour by hour</span></div></div>
+  <div class="icon glass" id="i3"><div class="ic" style="background:#F7E6F7"><svg width="50" height="50" viewBox="0 0 24 24" fill="none" stroke="#AA00AA" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="18" r="2.4"/><path d="M7.4 18H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h7"/><path d="m19 4-3 0M19 4l-2-2M19 4l-2 2"/></svg></div><div><b>Guide</b><span>every family to a shelter with space</span></div></div>
+</div>
+
+<div id="tag" class="abs glass"><div>See the risk.</div><div>Plan around it.</div></div>
+<div id="reach" class="abs"><span class="first">Selangor</span><span>Malaysia</span><span>ASEAN</span><span>the world</span></div>
+
+<!-- cutaway: other cities -->
+<div id="cities" class="layer"><h2>Other cities already do this</h2>
+  <div class="city glass" id="cJp" style="left:220px"><svg class="flag" viewBox="0 0 70 46"><rect width="70" height="46" fill="#fff"/><circle cx="35" cy="23" r="13" fill="#BC002D"/></svg>
+    <h4>Japan</h4><p><em style="background:#AA00AA"></em>5 alert levels, one action each</p><p><em style="background:#08A045"></em>Live shelter crowding</p></div>
+  <div class="city glass" id="cSg" style="left:1000px"><svg class="flag" viewBox="0 0 70 46"><rect width="70" height="23" fill="#EF3340"/><rect y="23" width="70" height="23" fill="#fff"/><circle cx="16" cy="12" r="7" fill="#fff"/><circle cx="19" cy="12" r="6.2" fill="#EF3340"/></svg>
+    <h4>Singapore</h4><p><em style="background:#1A73E8"></em>1,000+ water-level sensors</p><p><em style="background:#F2A900"></em>SMS flood alerts</p></div>
+  <div id="citiesSrc">Sources: Cabinet Office of Japan (alert levels, 2021) · VACAN shelter crowding · PUB Singapore (2025) — see docs/REFERENCES.md</div>
+</div>
+
+<!-- demo -->
+<div id="stage" class="layer">
+  <div id="win"><div id="bar"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#28C840"></i>
+      <div id="url"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#777" stroke-width="2.5"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>ginkgo · Selangor flood command center</div></div>
+    <div id="vp"><img id="app" alt=""><div id="ov">
+      <div id="ring" class="ring"></div><div id="ring2" class="ring"></div>
+      <div id="lab" class="label"><em></em><span></span></div><div id="lab2" class="label"><em></em><span></span></div>
+      <div id="alertChip">LEVEL 4 · Evacuate <small>floods within 1 hour</small></div>
+      <div id="rip" class="ripple"></div>
+      <svg id="cursor" viewBox="0 0 24 24"><path d="M4 2.5 4 19.5 8.6 15.4 11.6 22 14.6 20.7 11.7 14.2 18 14.2Z" fill="#fff" stroke="#111" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    </div></div>
+  </div>
+  <div id="chapters"></div>
+</div>
+
+<!-- closing -->
+<div id="end" class="layer">
+  <div id="logos"><img id="lgU" src="/brand/uitm.png" style="height:150px" alt="UiTM"><div class="sep"></div>
+    <div id="gk"><img src="/logo.svg" alt="">Ginkgo</div><div class="sep"></div><img id="lgR" src="/brand/urbiee.png" style="height:150px" alt="URBIEE 2026"></div>
+  <div id="endTag">See the risk. <span>Plan around it.</span></div>
+  <div id="endSmall">The flood drill shown is a simulation, not a forecast. AI answer shown is a scripted replay using the app's real tools and data.<br>
+    Data: Copernicus GLO-30, OpenStreetMap/Overture, JRC Global Surface Water, ESA WorldCover, Meta HRSL, DOSM Census 2020.<br>
+    Original music and sound effects made in code.</div>
+</div>
+
+<div id="sting" class="layer"><svg id="leafBig" viewBox="0 0 64 64"></svg><div id="wordBig">Gink<span>go</span></div></div>
+<div id="bug"><img src="/logo.svg" alt="">Ginkgo</div>
+<div id="cap"><div></div></div>
+<div id="black" class="layer"></div>
+
+<script>
+const FPS = 30, W = 1920, H = 1080, VW = 1700, VH = 956.25, K = VW / 1920;
+const $ = id => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const out3 = x => 1 - (1 - clamp(x)) ** 3;
+const inOut = x => { x = clamp(x); return x < .5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2; };
+const back = x => { x = clamp(x); const c = 1.5; return 1 + (c + 1) * (x - 1) ** 3 + c * (x - 1) ** 2; };
+const prog = (t, a, d) => clamp((t - a) / d);
+// visibility envelope: fade in at a over din, out at b over dout
+const env = (t, a, b, din = .4, dout = .3) => Math.min(out3((t - a) / din), 1 - inOut((t - (b - dout)) / dout));
+const show = (el, o, tr = '') => { el.style.opacity = o; el.style.visibility = o > 0.001 ? 'visible' : 'hidden'; if (tr !== null) el.style.transform = tr; };
+
+let E, M, CFG, FACE, T = {}, CUES = [], CAPS = [], SCENES = [], CAMS = {}, CUR = [];
+
+const words = id => E.captions.filter(w => w.clip === id);
+const norm = s => s.toLowerCase().replace(/[^a-z0-9.]/g, '').replace(/\.$/, '');
+function wt(ids, text, n = 0, end = false) {
+  const list = [].concat(ids).flatMap(words).filter(w => norm(w.w) === norm(text));
+  if (!list[n]) { console.warn('word not found', ids, text); return NaN; }
+  return end ? list[n].e : list[n].s;
+}
+
+async function load() {
+  const j = u => fetch(u).then(r => (r.ok ? r.json() : {}));
+  [E, M, CFG, FACE] = await Promise.all([j('/w/edl.json'), j('/w/capture/meta.json'), j('/config.json'), j('/w/face/index.json')]);
+  const C = Object.fromEntries(E.clips.map(c => [c.id, c]));
+  T.C = C;
+  T.total = E.total;
+  // ── key moments, all from the transcript ──
+  T.sting = C.A1.t1 - 0.12;
+  T.hi = wt('A2', 'hi');
+  T.one = wt('A3', 'one'); T.two = wt('A3', 'two'); T.three = wt('A3', 'three', 1); // the first "three" is "three parts"
+  T.quarter = wt('A3', '1'); T.mil = wt('A3', '1.9'); T.when = wt('A3', 'when'); T.where = wt('A3', 'where');
+  T.k15 = wt('A3b', '15,000');
+  T.tokyo = wt('A4', 'cities'); T.space = wt('A4', 'space', 0, true);
+  T.map = wt('A5', 'map'); T.drill = wt('A5', 'drill'); T.guide = wt('A5', 'guide'); T.letMe = wt('A5', 'let');
+  T.demoIn = C.A5.t1 + 0.45;
+  T.red = wt('B1', 'red'); T.purple = wt('B2', 'purple');
+  T.level = wt('B3', 'level'); T.taman = wt('B3', 'taman'); T.click3 = wt('B3', 'one');
+  T.dry = wt('B3', 'dry'); T.leaveBy = wt('B3', 'when');
+  T.capacity = wt('B4', 'capacity'); T.whenFull = wt('B4b', 'when');
+  T.twoM = wt('B5', '2'); T.street = wt('B5', 'street');
+  T.checked = wt('B6', 'checked');
+  T.see = wt('C', 'see'); T.sel = wt('C', 'selangor'); T.my = wt('C', 'malaysia'); T.asean = wt(['C', 'Cb'], 'asean'); T.world = wt(['C', 'Cb'], 'world');
+  T.demoOut = C.C.t0 - 0.9;
+  T.end = C.Cb.t1 + 0.2;
+  buildScenes(C);
+  buildCaptions();
+  buildCues(C);
+  $('lowerName').textContent = CFG.name ?? '';
+  $('lowerSub').textContent = [CFG.role, CFG.university].filter(Boolean).join(' · ');
+  $('chapters').innerHTML = ['Map', 'Drill', 'Route', 'Shelter', '3D', 'Ask AI'].map(n => `<div class="chap"><div class="fill"></div><span>${n}</span></div>`).join('');
+  // the logo's own drawing, wrapped so it can fade in after its outline draws on
+  const svg = await fetch('/logo.svg').then(r => r.text());
+  const inner = svg.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '').replace(/<title>[\s\S]*?<\/title>/, '');
+  const defs = inner.match(/<defs>[\s\S]*?<\/defs>/)[0];
+  const shape = defs.match(/id="g-shape" d="([^"]+)"/)[1];
+  $('leafBig').innerHTML = `${defs}<g id="leafFill">${inner.replace(defs, '')}</g>` +
+    `<path id="leafLine" d="${shape}" pathLength="1" fill="none" stroke="#08A045" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="1 1"/>`;
+  await document.fonts.ready;
+  await Promise.all([...document.images].map(i => i.decode().catch(() => {})));
+}
+
+// ── demo scenes: footage, camera, cursor ───────────────────────────────────────────────────────
+const box = (b, pad = 0) => b ? { x: b.x - pad, y: b.y - pad, w: b.w + 2 * pad, h: b.h + 2 * pad } : { x: 860, y: 440, w: 200, h: 200 };
+const ctr = b => [b.x + b.w / 2, b.y + b.h / 2];
+
+function buildScenes(C) {
+  const n = k => M[k]?.frames ?? 1;
+  const seq = (dir, a, b, f0, f1) => ({ dir, a, b, src: t => `/w/capture/${dir}/f_${String(Math.round(lerp(f0, f1, clamp((t - a) / (b - a))))).padStart(4, '0')}.jpg` });
+  const still = (path, a, b) => ({ a, b, src: () => `/w/capture/${path}` });
+  const s1 = seq('s1', T.letMe + 0.2, C.B2.t0 - 1.0, 0, n('s1') - 1);
+  const s2 = seq('s2', s1.b, C.B3.t0 - 1.4, 0, n('s2') - 1);
+  const s3a = still('s3/before.jpg', s2.b, T.click3 + 0.25);
+  const drawEnd = s3a.b + 5;
+  const s3 = { a: s3a.b, b: C.B4.t0 - 1.0, src: t => `/w/capture/s3/f_${String(Math.round(lerp(0, n('s3') - 1, clamp((t - s3a.b) / (drawEnd - s3a.b))))).padStart(4, '0')}.jpg` };
+  const s4 = seq('s4', s3.b, C.B5.t0 - 0.5, 0, n('s4') - 1);
+  // 3D frames 60–330 (clock ~T+1:00 → T+4:00): the depth card reads ≈2 m as he says "two metres"
+  T.s5f = [Math.min(60, n('s5') - 1), Math.min(330, n('s5') - 1)];
+  const s5 = seq('s5', s4.b, C.B5.t1 + 0.6, ...T.s5f);
+  const typeN = M.typeFrames ?? 1;
+  const typeA = s5.b + 0.35, typeB = typeA + 3.1;
+  const s6t = { a: s5.b, b: typeB + 0.25, src: t => `/w/capture/s6/type_${String(Math.round(lerp(0, typeN - 1, clamp((t - typeA) / (typeB - typeA))))).padStart(3, '0')}.jpg` };
+  const s6k = still('s6/thinking.jpg', s6t.b, s6t.b + 1.7);
+  const s6 = still('s6/answer.jpg', s6k.b, T.demoOut + 0.6);
+  SCENES = [s1, s2, s3a, s3, s4, s5, s6t, s6k, s6];
+  Object.assign(T, { s1, s2, s3a, s3, s4, s5, s6t, s6k, s6, typeA, typeB, drawEnd });
+  T.chapters = [s1.a, s2.a, s3a.a, s4.a, s5.a, s6t.a, s6.b];
+
+  // camera keyframes per scene: [time, cx, cy, scale] in app px (1920×1080)
+  const full = [960, 540, 1];
+  const on = (b, s) => [...ctr(box(b)), s];
+  CAMS.s1 = [[s1.a, ...full], [s1.b, ...full]];
+  CAMS.s2 = [[s2.a, ...full], [T.purple + 2.4, ...full], [s2.b, 800, 600, 1.3]];
+  CAMS.s3a = [[s3a.a, ...full], [s3a.a + 0.4, ...full], [s3a.a + 1.6, ...on(M.alertRow, 1.55)], [s3a.b, ...on(M.alertRow, 1.6)]];
+  CAMS.s3 = [[s3.a, ...on(M.alertRow, 1.6)], [s3.a + 0.9, ...full], [T.leaveBy - 0.9, ...full], [T.leaveBy - 0.1, ...on(M.leaveBox, 1.55)], [s3.b, ...on(M.leaveBox, 1.6)]];
+  CAMS.s4 = [[s4.a, ...full], [s4.a + 1.0, ...on(M.card, 1.35)], [s4.b - 1.3, ...on(M.card, 1.42)], [s4.b - 0.7, ...full], [s4.b, ...full]];
+  CAMS.s5 = [[s5.a, ...full], [s5.b, 960, 540, 1.06]];
+  CAMS.s6t = [[s6t.a, ...full], [s6t.a + 0.5, ...on(M.search, 1.5)], [s6t.b, ...on(M.search, 1.5)]];
+  CAMS.s6k = [[s6k.a, ...on(M.search, 1.5)], [s6k.b, ...full]];
+  const ans = M.grounding ? [Math.min(M.grounding.x + M.grounding.w / 2, 1500), M.grounding.y - 120] : [1600, 500];
+  CAMS.s6 = [[s6.a, ...full], [s6.a + 1.4, ...ans, 1.3], [T.checked - 0.5, ...ans, 1.3], [T.checked + 0.3, ...ctr(box(M.grounding)), 1.55], [s6.b, ...ctr(box(M.grounding)), 1.6]];
+  SCENES.forEach((s, i) => (s.cam = CAMS[['s1', 's2', 's3a', 's3', 's4', 's5', 's6t', 's6k', 's6'][i]]));
+
+  // cursor waypoints: [time, x, y, click?] (app px)
+  const P = (b, dx = 0, dy = 0) => { const [x, y] = ctr(box(b)); return [x + dx, y + dy]; };
+  CUR = [
+    [s1.a, 1500, 760], [s1.b - 1.4, 1500, 760], [s1.b - 0.45, ...P(M.drillBtn), 1],
+    [s2.a + 0.25, ...P(M.drillBtn)], [s2.a + 0.95, ...P(M.playBtn), 1], [s2.a + 2.2, 1150, 820],
+    [s3a.a + 0.5, 1150, 820], [T.click3 - 0.9, ...P(M.routeBtn, -40, 30)], [T.click3, ...P(M.routeBtn), 1],
+    [s3.a + 1.2, 1100, 900], [s4.a + 0.3, 1100, 900],
+    [s4.b - 1.0, ...P(M.chip3dDrill ?? M.chip3d, 40, 40)], [s4.b - 0.3, ...P(M.chip3dDrill ?? M.chip3d), 1], [s4.b + 0.05, ...P(M.chip3dDrill ?? M.chip3d)],
+    [s6t.a + 0.2, ...P(M.search, 200, 60)], [s6t.a + 0.45, ...P(M.search, 120, 0), 1], [s6t.b - 0.05, ...P(M.search, 160, 50)],
+    [s6.b, 1500, 900],
+  ];
+  T.cursorHide = [[s5.a, s6t.a + 0.1]]; // the 3D scene has no app chrome to point at
+}
+
+function camAt(keys, t) {
+  let i = 0;
+  while (i < keys.length - 2 && t > keys[i + 1][0]) i++;
+  const [ta, xa, ya, sa] = keys[i], [tb, xb, yb, sb] = keys[Math.min(i + 1, keys.length - 1)];
+  const u = tb > ta ? inOut((t - ta) / (tb - ta)) : 1;
+  const s = lerp(sa, sb, u);
+  const hw = 960 / s, hh = 540 / s;
+  return { cx: clamp(lerp(xa, xb, u), hw, 1920 - hw), cy: clamp(lerp(ya, yb, u), hh, 1080 - hh), s };
+}
+const toVp = (cam, x, y) => [(x - cam.cx) * cam.s * K + VW / 2, (y - cam.cy) * cam.s * K + VH / 2];
+
+function cursorAt(t) {
+  let i = 0;
+  while (i < CUR.length - 2 && t > CUR[i + 1][0]) i++;
+  const a = CUR[i], b = CUR[Math.min(i + 1, CUR.length - 1)];
+  const u = b[0] > a[0] ? inOut((t - a[0]) / (b[0] - a[0])) : 1;
+  // a gentle arc: quadratic bezier with the control point lifted off the straight line
+  const mx = (a[1] + b[1]) / 2 - (b[2] - a[2]) * 0.18, my = (a[2] + b[2]) / 2 + (b[1] - a[1]) * 0.18;
+  const x = (1 - u) ** 2 * a[1] + 2 * (1 - u) * u * mx + u * u * b[1];
+  const y = (1 - u) ** 2 * a[2] + 2 * (1 - u) * u * my + u * u * b[2];
+  return [x, y];
+}
+
+// ── captions ───────────────────────────────────────────────────────────────────────────────────
+function buildCaptions() {
+  const ws = E.captions;
+  let cur = [];
+  const flush = () => { if (cur.length) CAPS.push({ words: cur, s: cur[0].s }); cur = []; };
+  for (let i = 0; i < ws.length; i++) {
+    const w = ws[i], prev = cur[cur.length - 1];
+    const text = cur.map(x => x.w).join(' ');
+    if (prev && (w.s - prev.e > 0.55 || text.length + w.w.length > 78 || (/[.?!]$/.test(prev.w) && text.length > 24) || (/,$/.test(prev.w) && text.length > 52))) flush();
+    cur.push(w);
+  }
+  flush();
+  CAPS.forEach((c, i) => {
+    const next = CAPS[i + 1];
+    c.e = Math.min(c.words[c.words.length - 1].e + 0.35, next ? next.s - 0.04 : 1e9);
+    c.s = c.s - 0.06;
+    // two balanced lines of at most ~42 characters
+    const text = c.words.map(w => w.w).join(' ');
+    if (text.length <= 42) c.lines = [text];
+    else {
+      let best = null;
+      for (let k = 1; k < c.words.length; k++) {
+        const a = c.words.slice(0, k).map(w => w.w).join(' '), b = c.words.slice(k).map(w => w.w).join(' ');
+        const score = Math.max(a.length, b.length);
+        if (!best || score < best[0]) best = [score, a, b];
+      }
+      c.lines = [best[1], best[2]];
+    }
+  });
+}
+
+// ── sound cues (written to work/cues.json by render.mjs) ─────────────────────────────────────────
+function buildCues(C) {
+  const q = (t, sfx, o = {}) => Number.isFinite(t) && CUES.push({ t: +t.toFixed(3), sfx, ...o });
+  const pan = x => +(((x / 1920) * 2 - 1) * 0.45).toFixed(2);
+  q(0, 'rain', { dur: T.sting + 1.6 });
+  q(0.4, 'rumble', { dur: T.sting + 0.4, gain: -6 });
+  const title = 'December 2021 · Taman Sri Muda';
+  [...title].forEach((ch, i) => ch !== ' ' && q(0.55 + i * 0.055, 'key', { gain: -8, pan: -0.3 }));
+  q(T.sting + 0.05, 'sting', { gain: -5 });
+  q(T.C.A2.t0 + 0.05, 'whoosh', { gain: -4 });
+  q(T.hi + 0.3, 'swish');
+  for (const t of [T.one, T.two, T.three]) q(t, 'pop', { pan: 0.35 });
+  for (const t of [T.quarter, T.mil, T.k15]) { q(t, 'pop', { pan: 0.35 }); for (let k = 1; k < 9; k++) q(t + k * 0.08, 'tick', { pan: 0.35, gain: -4 }); }
+  q(T.when, 'pop', { pan: 0.3 }); q(T.where, 'pop', { pan: 0.3 });
+  q(T.tokyo - 0.25, 'whoosh'); q(T.tokyo + 0.35, 'pop', { pan: -0.3 }); q(T.tokyo + 0.6, 'pop', { pan: 0.3 }); q(T.space + 0.05, 'whoosh', { gain: -3 });
+  for (const t of [T.map, T.drill, T.guide]) q(t, 'pop', { pan: 0.35 });
+  q(T.demoIn - 2.2, 'riser', { dur: 2.2 }); q(T.demoIn, 'impact');
+  for (let i = 0; i < CUR.length; i++) if (CUR[i][3]) q(CUR[i][0], 'click', { pan: pan(CUR[i][1]) });
+  q(T.taman, 'alert');
+  q(T.s3a.b + 0.1, 'swish', { gain: -2 });
+  q(T.red, 'pop'); q(T.dry, 'pop'); q(T.leaveBy, 'pop'); q(T.whenFull, 'pop');
+  q(T.s5.a + 0.05, 'whoosh', { gain: -2 }); q(T.s5.a, 'rumble', { dur: T.s5.b - T.s5.a + 0.6, gain: -4 }); q(T.twoM, 'pop');
+  const qn = 'Simulate the Klang Valley storm. How do people in Taman Sri Muda get to safety?';
+  [...qn].forEach((ch, i) => ch !== ' ' && q(T.typeA + (i / qn.length) * (T.typeB - T.typeA), 'key', { gain: -3 }));
+  q(T.typeB + 0.15, 'key', { gain: 4 });
+  q(T.checked + 0.25, 'success');
+  q(T.demoOut, 'whoosh');
+  q(T.see, 'swish', { gain: -2 });
+  for (const t of [T.sel, T.my, T.asean, T.world]) q(t, 'pop', { pan: 0.35, gain: -2 });
+  q(T.end, 'sting');
+  CUES.sort((a, b) => a.t - b.t);
+}
+
+// ── frame ─────────────────────────────────────────────────────────────────────────────────────
+const loads = [];
+function setSrc(img, url) {
+  if (img.dataset.src === url) return;
+  img.dataset.src = url;
+  img.src = url;
+  loads.push(img.decode().catch(() => {}));
+}
+
+function faceFrame(t) {
+  const clips = E.clips.filter(c => c.picture === 'face');
+  let c = clips.find(c => t >= c.t0 && t < c.t1);
+  let k;
+  if (c) k = Math.floor((t - c.t0) * FPS);
+  else {
+    const next = clips.find(c => c.t0 >= t);
+    if (next && (!clips.some(c => c.t1 <= t) || next.t0 - t < 1.5)) { c = next; k = 0; }
+    else { c = [...clips].reverse().find(c => c.t1 <= t) ?? clips[0]; k = 1e9; }
+  }
+  const n = FACE[c.id] ?? 1;
+  return { clip: c.id, url: `/w/face/${c.id}/f_${String(clamp(k, 0, n - 1)).padStart(5, '0')}.jpg` };
+}
+
+function drawRain(t, o) {
+  const cv = $('rain'), g = cv.getContext('2d');
+  g.clearRect(0, 0, W, H);
+  if (o <= 0) return;
+  g.strokeStyle = `rgba(210,225,245,${0.32 * o})`;
+  g.lineWidth = 1.6;
+  g.beginPath();
+  for (let i = 0; i < 260; i++) {
+    const r1 = (Math.sin(i * 12.9898) * 43758.5453) % 1, r2 = (Math.sin(i * 78.233) * 12345.678) % 1;
+    const v = 900 + Math.abs(r2) * 700, len = 22 + Math.abs(r1) * 30;
+    const y = ((Math.abs(r2) * 1300 + t * v) % 1300) - 120, x = ((Math.abs(r1) * 2100 + t * 120) % 2100) - 90 - y * 0.12;
+    g.moveTo(x, y); g.lineTo(x - len * 0.12, y + len);
+  }
+  g.stroke();
+}
+
+window.renderAt = async t => {
+  loads.length = 0;
+  const C = T.C;
+  // which big layer is on
+  const coldO = 1 - prog(t, T.sting, 0.35);
+  const demoO = t >= T.letMe && t < T.demoOut + 0.8 ? 1 : 0;
+  const endO = prog(t, T.end, 0.5);
+
+  // cold open
+  show($('cold'), coldO > 0 ? 1 : 0, '');
+  if (coldO > 0) {
+    const n = M.s5?.frames ?? 390;
+    const f = Math.round(lerp(Math.max(0, n - 300), n - 1, clamp(t / (T.sting + 0.4))));
+    setSrc($('coldImg'), `/w/capture/s5/f_${String(f).padStart(4, '0')}.jpg`);
+    // crop to the model: leave out the 3D view's title bar (top) and depth card (bottom-left)
+    $('coldImg').style.transform = `translate(-196px, 40px) scale(${(1.28 + 0.05 * t / 10).toFixed(4)})`;
+    drawRain(t, 1);
+    const title = 'December 2021 · Taman Sri Muda';
+    const k = Math.floor(clamp((t - 0.55) / 0.055, 0, title.length));
+    $('coldTitle').innerHTML = title.slice(0, k).replace(/</g, '') + (Math.floor(t * 2.2) % 2 || k < title.length ? '<span class="caret"></span>' : '');
+    show($('coldTitle'), env(t, 0.4, T.sting, 0.3, 0.3));
+    show($('coldSmall'), env(t, 2.6, T.sting, 0.6, 0.3), `translateX(${-30 * (1 - out3((t - 2.6) / 0.6))}px)`);
+  }
+
+  // face (on camera parts)
+  const faceOn = (t >= T.sting && t < T.demoIn + 0.1) || t >= T.demoOut - 0.1;
+  show($('faceWrap'), faceOn ? 1 : 0, '');
+  if (faceOn) {
+    const f = faceFrame(t);
+    setSrc($('face'), f.url);
+    // face on the left third; punch in on the jump cut (A3b) and hold until the cutaway hides the return
+    // the webcam centres the face; scale a little and shift so it sits left of the right-third graphics
+    let s = 1.18 + 0.015 * ((t % 30) / 30);
+    if (t >= C.A3b.t0 && t < T.tokyo + 0.5) s = 1.27;
+    let blur = 0;
+    if (t >= T.letMe && t < T.demoIn + 0.2) { const u = inOut((t - T.letMe - 0.2) / (T.demoIn - T.letMe - 0.2)); s += 0.12 * u; blur = 10 * u; }
+    $('face').style.transform = `translate(-170px, 20px) scale(${s.toFixed(4)})`;
+    $('face').style.filter = `brightness(1.07) contrast(1.06) saturate(1.1)${blur ? ` blur(${blur.toFixed(1)}px)` : ''}`;
+  }
+
+  // logo sting → corner bug
+  const so = env(t, T.sting - 0.2, C.A2.t0 + 0.35, 0.3, 0.45);
+  show($('sting'), so, '');
+  if (so > 0) {
+    const draw = prog(t, T.sting, 0.6), fill = prog(t, T.sting + 0.45, 0.4);
+    $('leafLine').style.strokeDashoffset = 1 - out3(draw);
+    $('leafLine').style.opacity = 1 - fill * 0.6;
+    $('leafFill').style.opacity = out3(fill);
+    $('leafBig').style.transform = `scale(${0.9 + 0.1 * back(fill)})`;
+    show($('wordBig'), prog(t, T.sting + 0.45, 0.4), `translateY(${16 * (1 - out3((t - T.sting - 0.45) / 0.4))}px)`);
+  }
+  const bugO = Math.max(faceOn && t < T.letMe + 0.2 ? prog(t, C.A2.t0 + 0.1, 0.5) : 0, t > T.demoOut ? prog(t, T.demoOut + 0.4, 0.5) : 0) * (1 - endO);
+  show($('bug'), bugO, `translate(${1660 + 20 * (1 - bugO)}px, 40px)`);
+
+  // lower third
+  const lo = env(t, T.hi + 0.3, T.hi + 5.3, 0.45, 0.35);
+  show($('lower'), lo > 0 ? 1 : 0, '');
+  if (lo > 0) {
+    $('lower').querySelector('.bar').style.transform = `scaleY(${out3((t - T.hi - 0.3) / 0.3)})`;
+    const tx = $('lower').querySelector('.txt');
+    tx.style.clipPath = `inset(0 ${100 * (1 - out3((t - T.hi - 0.45) / 0.45))}% 0 0)`;
+    tx.style.opacity = 1 - inOut((t - (T.hi + 5.0)) / 0.3);
+    $('lower').querySelector('.bar').style.opacity = 1 - inOut((t - (T.hi + 5.0)) / 0.3);
+  }
+
+  // problems panel (A3)
+  const po = env(t, T.one - 0.1, T.tokyo + 0.05, 0.35, 0.25);
+  show($('panel'), po > 0 ? 1 : 0, '');
+  if (po > 0) {
+    [...$('chips').children].forEach((c, i) => {
+      const at = [T.one, T.two, T.three][i], next = [T.two, T.three, 1e9][i];
+      const p = back((t - at) / 0.35);
+      c.className = 'chip' + (t >= at && t < next ? ' on' : t >= next ? ' done' : '');
+      c.style.transform = `scale(${t >= at ? 0.85 + 0.15 * p : 0.85})`;
+      c.style.opacity = po * (t >= at - 0.4 ? 1 : 0.55);
+    });
+    const probs = [['p1', T.one, T.two], ['p2', T.two, T.three], ['p3', T.three, T.tokyo + 0.3]];
+    for (const [id, a, b] of probs) {
+      const o = env(t, a, b, 0.35, 0.25);
+      show($(id), o * po, `translateY(${18 * (1 - out3((t - a) / 0.35))}px)`);
+    }
+    for (const [id, at] of [['st1', T.quarter], ['st2', T.mil], ['st3', T.k15]]) {
+      const el = $(id), n = el.querySelector('.n'), p = prog(t, at, 0.75);
+      el.style.maxHeight = `${240 * out3((t - at + 0.05) / 0.35)}px`;
+      el.style.paddingTop = el.style.paddingBottom = `${(t >= at - 0.05 ? 1 : 0) * 17}px`;
+      el.style.borderTopWidth = t >= at - 0.05 ? '1px' : '0';
+      show(el, out3((t - at) / 0.3), `translateY(${14 * (1 - out3((t - at) / 0.3))}px)`);
+      const v = +n.dataset.to * out3(p);
+      n.textContent = n.dataset.fmt === 'pct' ? `${v.toFixed(1)}%` : n.dataset.fmt === 'mil' ? `~${v.toFixed(1)} million` : Math.round(v).toLocaleString('en-US');
+    }
+    show($('q1'), out3((t - T.when) / 0.3), `scale(${0.9 + 0.1 * back((t - T.when) / 0.35)})`);
+    show($('q2'), out3((t - T.where) / 0.3), `scale(${0.9 + 0.1 * back((t - T.where) / 0.35)})`);
+  }
+
+  // cutaway (A4)
+  const co = env(t, T.tokyo - 0.2, T.space + 0.35, 0.4, 0.35);
+  // a slow push keeps the card alive while it holds
+  show($('cities'), co, `scale(${(1.03 - 0.03 * out3((t - T.tokyo + 0.2) / 0.5) + 0.025 * prog(t, T.tokyo, T.space - T.tokyo + 0.4)).toFixed(4)})`);
+  if (co > 0) {
+    show($('cJp'), out3((t - T.tokyo - 0.3) / 0.4), `translateY(${30 * (1 - back((t - T.tokyo - 0.3) / 0.5))}px)`);
+    show($('cSg'), out3((t - T.tokyo - 0.55) / 0.4), `translateY(${30 * (1 - back((t - T.tokyo - 0.55) / 0.5))}px)`);
+  }
+
+  // Map · Drill · Guide (A5)
+  const io = env(t, T.map - 0.1, T.letMe + 0.6, 0.3, 0.4);
+  show($('icons'), io > 0 ? 1 : 0, '');
+  if (io > 0) [['i1', T.map], ['i2', T.drill], ['i3', T.guide]].forEach(([id, at]) =>
+    show($(id), Math.min(io, out3((t - at) / 0.3)), `translateX(${60 * (1 - back((t - at) / 0.45))}px)`));
+
+  // demo
+  show($('stage'), demoO, '');
+  if (demoO) {
+    // window flies in on "Let me show you", leaves before the ask
+    const inU = inOut((t - T.letMe - 0.15) / (T.demoIn - T.letMe - 0.15));
+    const outU = inOut((t - T.demoOut) / 0.75);
+    const sc = lerp(0.42, 1, inU) * lerp(1, 0.9, outU);
+    const tx = lerp(330, 0, inU), ty = lerp(40, 0, inU) + lerp(0, 40, outU);
+    $('win').style.transform = `translate(${tx}px, ${ty}px) scale(${sc})`;
+    $('win').style.opacity = Math.min(prog(t, T.letMe + 0.1, 0.3), 1 - outU);
+    $('stage').style.background = '';
+    $('stage').style.opacity = Math.min(prog(t, T.letMe + 0.35, 0.6), 1 - outU);
+    const scene = SCENES.find(s => t >= s.a && t < s.b) ?? (t < SCENES[0].a ? SCENES[0] : SCENES[SCENES.length - 1]);
+    setSrc($('app'), scene.src(t));
+    const cam = camAt(scene.cam, t);
+    $('app').style.transform = `translate(${VW / 2 - cam.cx * cam.s * K}px, ${VH / 2 - cam.cy * cam.s * K}px) scale(${cam.s})`;
+
+    // cursor + click ripple
+    const hidden = T.cursorHide.some(([a, b]) => t >= a && t < b) || t < T.s1.a + 0.6;
+    const [cx, cy] = cursorAt(t);
+    const [px, py] = toVp(cam, cx, cy);
+    show($('cursor'), hidden ? 0 : 1, `translate(${px - 7}px, ${py - 4}px)`);
+    const clk = CUR.filter(c => c[3] && t >= c[0] && t < c[0] + 0.5).pop();
+    if (clk) {
+      const u = (t - clk[0]) / 0.5, [rx, ry] = toVp(cam, clk[1], clk[2]);
+      show($('rip'), 1 - u, `translate(${rx}px, ${ry}px) scale(${1 + 4 * out3(u)})`);
+      if (t - clk[0] < 0.12) $('cursor').style.transform += ' scale(0.88)';
+    } else show($('rip'), 0);
+
+    // rings and labels
+    const ring = (el, b, a, z, pad = 10) => {
+      const o = env(t, a, z, 0.3, 0.3);
+      if (o <= 0 || !b) return show(el, 0);
+      const [x0, y0] = toVp(cam, b.x - pad, b.y - pad), [x1, y1] = toVp(cam, b.x + b.w + pad, b.y + b.h + pad);
+      el.style.left = `${x0}px`; el.style.top = `${y0}px`; el.style.width = `${x1 - x0}px`; el.style.height = `${y1 - y0}px`;
+      show(el, o, `scale(${1.08 - 0.08 * out3((t - a) / 0.35)})`);
+    };
+    const label = (el, text, color, ax, ay, a, z, side = 'right') => {
+      const o = env(t, a, z, 0.3, 0.3);
+      if (o <= 0) return show(el, 0);
+      el.querySelector('span').textContent = text;
+      el.querySelector('em').style.background = color;
+      const [x, y] = toVp(cam, ax, ay);
+      el.style.left = `${x}px`; el.style.top = `${y}px`;
+      const shift = side === 'left' ? 'translate(-100%, -50%)' : side === 'below' ? 'translate(-50%, 0)' : side === 'above' ? 'translate(-50%, -100%)' : 'translate(0, -50%)';
+      show(el, o, `${shift} scale(${0.85 + 0.15 * back((t - a) / 0.4)})`);
+    };
+    show($('ring'), 0); show($('ring2'), 0); show($('lab'), 0); show($('lab2'), 0); show($('alertChip'), 0);
+    if (scene === T.s1) {
+      ring($('ring'), { x: 338, y: 872, w: 212, h: 128 }, T.red - 0.1, T.red + 3.2, 6);
+      label($('lab'), 'Red = most likely to flood', '#D93025', 444, 852, T.red, T.red + 3.4, 'above');
+    }
+    if (scene === T.s2) {
+      // the legend's "Floods ≤ 1 h · Evacuate now" row
+      ring($('ring'), { x: 340, y: 858, w: 245, h: 24 }, T.purple - 0.1, T.purple + 2.6, 4);
+      label($('lab'), 'Purple = floods within 1 hour', '#AA00AA', 610, 870, T.purple, T.purple + 2.8, 'right');
+    }
+    if (scene === T.s3a) {
+      ring($('ring'), M.alertRow, T.level - 0.2, T.s3a.b + 0.3, 6);
+      const ab = box(M.alertRow);
+      const o = env(t, T.taman, T.s3a.b + 0.2, 0.3, 0.3);
+      if (o > 0) {
+        const [x, y] = toVp(cam, ab.x + 4, ab.y - 12);
+        $('alertChip').style.left = `${x}px`; $('alertChip').style.top = `${y}px`;
+        show($('alertChip'), o, `translate(0, -100%) scale(${0.8 + 0.2 * back((t - T.taman) / 0.4)})`);
+      }
+    }
+    if (scene === T.s3) {
+      label($('lab'), 'Roads that stay dry', '#1A73E8', 1010, 560, T.dry - 0.1, T.leaveBy - 0.6, 'right');
+      const lb = box(M.leaveBox);
+      ring($('ring'), M.leaveBox, T.leaveBy, T.s3.b + 0.3, 8);
+      label($('lab2'), `Leave by ${(/T\+\d+:\d\d/.exec(M.leaveBy ?? '') ?? ['…'])[0]}`, '#08A045', lb.x - 30, lb.y + lb.h / 2, T.leaveBy + 0.15, T.s3.b + 0.3, 'left');
+    }
+    if (scene === T.s4) {
+      ring($('ring'), M.card, T.capacity - 0.3, T.s4.b - 0.8, 8);
+      const cb = box(M.card);
+      const full = /full at\s*(T\+\d+:\d\d)/i.exec(M.cardText ?? '');
+      label($('lab'), full ? `Full at ${full[1]}` : 'Filling up', '#D93025', cb.x - 30, cb.y + cb.h * 0.7, T.whenFull - 0.05, T.s4.b - 0.8, 'left');
+    }
+    if (scene === T.s5) {
+      const fi = Math.round(lerp(...T.s5f, clamp((T.twoM - T.s5.a) / (T.s5.b - T.s5.a))));
+      const d = parseFloat(String(M.s5depth?.[fi] ?? '').replace(/[^\d.]/g, ''));
+      const txt = Number.isFinite(d) ? `≈${d.toFixed(1)} m deep here` : 'Water at the door';
+      T.depthLabel = txt;
+      const sk = box(M.skCard);
+      label($('lab'), txt, '#1A73E8', sk.x + sk.w / 2, sk.y - 24, T.twoM - 0.1, T.s5.b + 0.2, 'above');
+    }
+    if (scene === T.s6) {
+      ring($('ring'), M.grounding, T.checked, T.s6.b + 0.3, 8);
+      const g = box(M.grounding);
+      label($('lab'), '✓ Every figure checked', '#08A045', g.x + g.w / 2, g.y + g.h + 26, T.checked + 0.2, T.s6.b + 0.3, 'below');
+    }
+
+    // chapter bar
+    [...$('chapters').children].forEach((c, i) => {
+      const a = T.chapters[i], b = T.chapters[i + 1];
+      c.className = 'chap' + (t >= a && t < b ? ' on' : '');
+      c.querySelector('.fill').style.width = `${100 * clamp((t - a) / (b - a))}%`;
+    });
+    $('chapters').style.opacity = Math.min(prog(t, T.demoIn, 0.5), 1 - outU);
+  }
+
+  // part C: tagline, reach
+  const tg = env(t, T.see - 0.1, T.see + 3.6, 0.35, 0.35);
+  show($('tag'), tg, `translateX(${40 * (1 - out3((t - T.see + 0.1) / 0.45))}px)`);
+  const ro = env(t, T.sel - 0.1, T.end, 0.3, 0.3);
+  show($('reach'), ro > 0 ? 1 : 0, '');
+  if (ro > 0) [...$('reach').children].forEach((s, i) => {
+    const at = [T.sel, T.my, T.asean, T.world][i];
+    show(s, Math.min(ro, out3((t - at) / 0.3)), `scale(${0.85 + 0.15 * back((t - at) / 0.4)})`);
+  });
+
+  // closing scene
+  show($('end'), endO, `scale(${(1 + 0.03 * prog(t, T.end, T.total - T.end)).toFixed(4)})`);
+  if (endO > 0) {
+    const kids = [$('lgU'), $('gk'), $('lgR')];
+    kids.forEach((k, i) => { const a = T.end + 0.2 + i * 0.18; show(k, out3((t - a) / 0.4), `translateY(${24 * (1 - back((t - a) / 0.5))}px)`); });
+    show($('endTag'), out3((t - T.end - 0.9) / 0.5), `translateY(${16 * (1 - out3((t - T.end - 0.9) / 0.5))}px)`);
+    show($('endSmall'), out3((t - T.end - 1.3) / 0.6));
+  }
+  show($('black'), Math.max(1 - prog(t, 0, 0.6), prog(t, T.total - 0.7, 0.7)), '');
+
+  // captions
+  const c = CAPS.find(c => t >= c.s && t < c.e);
+  const capEl = $('cap');
+  if (c && t < T.end) {
+    capEl.firstChild.innerHTML = c.lines.map(l => l.replace(/</g, '')).join('<br>');
+    capEl.style.top = demoO && t > T.demoIn - 0.3 && t < T.demoOut ? '' : '';
+    capEl.style.bottom = demoO && t >= T.letMe + 0.5 && t < T.demoOut + 0.4 ? '74px' : '46px';
+    capEl.style.top = 'auto';
+    show(capEl, Math.min(prog(t, c.s, 0.12), 1 - prog(t, c.e - 0.1, 0.1)), '');
+  } else show(capEl, 0, '');
+
+  await Promise.all(loads);
+};
+
+window.filmReady = load().then(() => {
+  window.FILM_DURATION = T.total;
+  window.CUES = { duration: T.total, marks: { impact: T.demoIn, sting: T.sting, end: T.end }, cues: CUES };
+  window.CAPTIONS = CAPS.map(c => ({ s: c.s, e: c.e, text: c.lines.join('\n') }));
+  window.T = T;
+});
+</script>
+</body>
+</html>

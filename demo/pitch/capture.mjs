@@ -8,7 +8,8 @@
 //   drill  s2  Flood drill: water spreads, look-ahead moves (T+0 → T+2:30)
 //          s3  Alert → evacuation route drawn on the map
 //          s4  Evacuation centre card while centres fill (T+0:10 → T+3:20)
-//          s5  3D Taman Sri Muda: orbit while the water rises
+//   3d     s5  3D Taman Sri Muda: orbit while the water rises (own page at 1× pixels: the map and
+//              three.js together at 1.5× were too much for a laptop GPU)
 //   ai     s6  Ask Ginkgo: question typed, answer with the figure check
 // The AI scene uses a scripted stand-in for the model behind the real
 // /api/copilot contract; the tools, map actions and figures are the app's own.
@@ -19,20 +20,22 @@ import { chromium } from 'playwright';
 
 const OUT = process.argv[2] ?? 'demo/pitch/work/capture';
 const URL = process.env.GINKGO_URL ?? 'http://localhost:5173/';
-const SCENES = (process.env.SCENES ?? 'map,drill,ai').split(',');
+const SCENES = (process.env.SCENES ?? 'map,drill,3d,ai').split(',');
 const W = 1920, H = 1080, DSF = 1.5;
 const metaPath = join(OUT, 'meta.json');
 mkdirSync(OUT, { recursive: true });
 const meta = existsSync(metaPath) ? JSON.parse(readFileSync(metaPath, 'utf8')) : {};
 const save = () => writeFileSync(metaPath, JSON.stringify(meta, null, 1));
 
-const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
+// the GPU (ANGLE/D3D11 on Windows) renders the map ~4× faster than headless SwiftShader; GPU=0 turns it off
+const GPU_ARGS = process.env.GPU === '0' ? [] : ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'];
+const browser = await chromium.launch({ args: GPU_ARGS, ...(process.env.CHROME ? { executablePath: process.env.CHROME } : {}) });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 const lerp = (a, b, t) => a + (b - a) * t;
 
-async function open({ mock = false } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: DSF });
+async function open({ mock = false, dsf = DSF } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: dsf });
   const p = await ctx.newPage();
   p.on('pageerror', e => console.log('  PAGEERROR', e.message));
   if (mock) await p.route('**/api/copilot', mockAgent(p));
@@ -50,14 +53,24 @@ async function open({ mock = false } = {}) {
   return p;
 }
 
+// Settled = tiles loaded and the map has rendered since the pose. Not the 'idle' event: in drill mode
+// the clock's animation loop keeps the map repainting, so 'idle' never fires.
 const mapIdle = p => p.evaluate(() => new Promise(res => {
   const m = window.__ginkgoMap;
   if (!m) return res();
-  const t = setTimeout(res, 8000);
-  m.once('idle', () => { clearTimeout(t); res(); });
+  const t0 = performance.now();
+  let last = 0;
+  const onRender = () => (last = performance.now());
+  m.on('render', onRender);
+  const iv = setInterval(() => {
+    const now = performance.now();
+    const settled = last > t0 && m.areTilesLoaded() && !m.isMoving() && (now - last > 120 || now - t0 > 500);
+    if (settled || now - t0 > 8000) { clearInterval(iv); m.off('render', onRender); res(); }
+  }, 25);
   m.triggerRepaint();
 }));
-const jump = (p, c, z) => p.evaluate(({ c, z }) => window.__ginkgoMap.jumpTo({ center: c, zoom: z }), { c, z });
+// the braces matter: returning the Map object makes Playwright serialise all of it (seconds per frame)
+const jump = (p, c, z) => p.evaluate(({ c, z }) => { window.__ginkgoMap.jumpTo({ center: c, zoom: z }); }, { c, z });
 const camera = p => p.evaluate(() => { const m = window.__ginkgoMap; const c = m.getCenter(); return { c: [c.lng, c.lat], z: m.getZoom() }; });
 const setClock = (p, v) => p.locator('.scrub input[type="range"]').evaluate((el, v) => {
   const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
@@ -82,8 +95,11 @@ function flight(from, to) {
 async function frames(p, dir, n, pose) {
   mkdirSync(join(OUT, dir), { recursive: true });
   for (let i = 0; i < n; i++) {
+    const t0 = Date.now();
     await pose(n === 1 ? 1 : i / (n - 1), i);
+    const t1 = Date.now();
     await shot(p, join(OUT, dir, `f_${String(i).padStart(4, '0')}.jpg`));
+    if (process.env.DEBUG) console.log(`   ${dir} ${i} pose ${t1 - t0} ms · shot ${Date.now() - t1} ms`);
     if (i % 60 === 0) console.log(`   ${dir} ${i}/${n}`);
   }
   meta[dir] = { ...(meta[dir] ?? {}), frames: n };
@@ -166,16 +182,10 @@ if (SCENES.includes('drill')) {
   mkdirSync(join(OUT, 's3'), { recursive: true });
   await shot(p, join(OUT, 's3', 'before.jpg'));
   const c0 = await camera(p);
-  // pick the mode: walk unless the walk is very long
+  // the film shows the walking route (the script's "leave by" moment); ROUTE_MODE=drive shows the car route
   await row.locator('.alert-go').click();
   await sleep(2500);
-  const walk = await p.locator('.route-hero').innerText().catch(() => '');
-  await p.locator('.seg button', { hasText: 'Drive' }).click();
-  await sleep(2500);
-  const drive = await p.locator('.route-hero').innerText().catch(() => '');
-  console.log('   walk:', walk.replace(/\n/g, ' '), '| drive:', drive.replace(/\n/g, ' '));
-  const walkMin = /(\d+) h/.test(walk) ? 60 * Number(walk.match(/(\d+) h/)[1]) : Number((walk.match(/(\d+) min/) ?? [0, 999])[1]);
-  meta.mode = walkMin <= 70 ? 'walk' : 'drive';
+  meta.mode = process.env.ROUTE_MODE ?? 'walk';
   await p.locator('.seg button', { hasText: meta.mode === 'walk' ? 'Walk' : 'Drive' }).click();
   await sleep(2500);
   await mapIdle(p);
@@ -206,7 +216,7 @@ if (SCENES.includes('drill')) {
     const tc = Math.min(1, i / 50), tr = Math.max(0, Math.min(1, (i - 50) / 80));
     const v = fly3(ease(tc));
     await jump(p, v.c, v.z);
-    await p.evaluate(d => window.__ginkgoMap.getSource('routes').setData(d), i >= 135 ? routes : cut(ease(tr)));
+    await p.evaluate(d => { window.__ginkgoMap.getSource('routes').setData(d); }, i >= 135 ? routes : cut(ease(tr)));
     await mapIdle(p);
   });
 
@@ -228,8 +238,20 @@ if (SCENES.includes('drill')) {
     await sleep(40);
     await mapIdle(p);
   });
+  meta.cardText = (await card.textContent()).replace(/\s+/g, ' ');
+  meta.chip3dDrill = await box(p, p.locator('.gm-chip.three-d'));
+  save();
 
+  await p.context().close();
+}
+
+// ── s5: 3D Taman Sri Muda ──
+if (SCENES.includes('3d')) {
   console.log('s5 · 3D');
+  const p = await open({ dsf: 1 });
+  await p.locator('.mode-switch button', { hasText: 'Flood drill' }).click();
+  await p.waitForSelector('.drill-panel');
+  await sleep(3000);
   await setClock(p, 40);
   await p.locator('.gm-chip.three-d').click();
   await p.waitForSelector('.sk-card', { timeout: 180000 });
@@ -243,6 +265,8 @@ if (SCENES.includes('drill')) {
     return { t: [t.x, t.y, t.z], c: [c.x, c.y, c.z] };
   });
   meta.s5 = start3;
+  meta.skCard = await box(p, p.locator('.sk-card'));
+  meta.s5depth = [];
   save();
   await frames(p, 's5', 390, async t => {
     await setClock(p, lerp(40, 270, ease(t)));
@@ -257,6 +281,7 @@ if (SCENES.includes('drill')) {
       s.controls.update();
     }, { start: start3, t: ease(t) });
     await p.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 30)))));
+    meta.s5depth.push(await p.locator('.sk-card b').first().textContent().catch(() => ''));
   });
   await p.context().close();
 }

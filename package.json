@@ -11,7 +11,8 @@
     "test": "vitest run",
     "demo:capture": "node demo/capture.mjs",
     "demo:render": "node demo/render.mjs",
-    "pitch:capture": "node demo/pitch/capture.mjs"
+    "pitch:capture": "node demo/pitch/capture.mjs",
+    "pitch:build": "node demo/pitch/build.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",

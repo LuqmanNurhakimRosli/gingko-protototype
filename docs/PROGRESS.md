@@ -29,10 +29,10 @@ Legend: ✅ done · 🟡 in progress / waiting · ⬜ planned · ⚠️ known is
 | Ginkgo logo and favicon | ✅ | |
 | Reference systems write-up (Japan, Singapore, Malaysia) | ✅ | `REFERENCES.md` |
 | 3D sketch model — Taman Sri Muda | ✅ | with drill water and route |
-| 3-minute pitch video | 🟡 | script done; recordings done (Parts A, B, C); edit happens locally with Claude Code — brief in `demo/pitch/PROMPT.md` |
+| 3-minute pitch video | ✅ | 2:59, 1920×1080, built from the founder's recordings + real app footage, motion graphics, original music and synthesised sound effects (`demo/pitch/`, `npm run pitch:build`); the render stays local (git-ignored) |
 | System guide and this tracker | ✅ | `SYSTEM_GUIDE.md`, `PROGRESS.md` |
 | Merge the branch into `main` | ✅ | fast-forward, 2026-10-17 |
-| Pitch demo capture script (`demo/pitch/capture.mjs`) | 🟡 | ⚠️ written, not run yet; first local run will need fixes |
+| Pitch demo capture script (`demo/pitch/capture.mjs`) | ✅ | runs on a laptop GPU (s1 map · s2–s4 drill · s5 3D · s6 AI); fixed: evaluate returning the Map object (7 s/frame), drill 'idle' never firing, 3D at 1.5× pixels crashing the GPU |
 
 ---
 
@@ -53,7 +53,8 @@ Legend: ✅ done · 🟡 in progress / waiting · ⬜ planned · ⚠️ known is
 | 2026-10-17 | `15d871e` | 3D sketch-style model of Taman Sri Muda with the drill's water |
 | 2026-10-17 | `8450dba` | 3-minute pitch video script |
 | 2026-10-17 | `a56cf59` | System guide, progress tracker and docs index |
-| 2026-10-17 | (this commit) | Pitch video brief for local editing (`demo/pitch/PROMPT.md`), demo capture script; **branch merged to `main`** |
+| 2026-10-17 | `e337021` | Pitch video brief for local editing (`demo/pitch/PROMPT.md`), demo capture script; **branch merged to `main`** |
+| 2026-10-17 | (this commit) | Pitch video pipeline: transcribe → edit list → capture → motion graphics → original music and effects → QA (`demo/pitch/`) |
 
 ---
 
@@ -83,7 +84,7 @@ Ordered by value for the exhibition and a council pilot.
 
 | # | Item | Why | Size |
 |---|---|---|---|
-| 1 | **Edit the pitch video** (under 4 min, motion graphics, music, sound effects) | The pitch | 1–2 local sessions with `demo/pitch/PROMPT.md` |
+| 1 | **Review the pitch video** with the founder; small notes re-render in ~10 min (`npm run pitch:build`) | The pitch | small |
 | 2 | **Refresh the 2-minute demo film** with the drill, the 3D view and the new logo | Current film predates them | 1 session |
 | 3 | **Deploy `main`** (Cloudflare Pages + AI key + spend limit) | Public link for judges | small |
 | 4 | **Test OpenRouter live** with the real key and model slug | Unverified so far | small |
@@ -102,7 +103,6 @@ Ordered by value for the exhibition and a council pilot.
 
 - ⚠️ The demo film (`docs/demo/ginkgo-demo.mp4`) shows the app before the drill, 3D view and new logo.
 - ⚠️ OpenRouter integration follows the documented API but has not been called live.
-- ⚠️ `demo/pitch/capture.mjs` has not been run; selectors and timings may need fixing on the first run.
 - The drill's water spreads by susceptibility score, not by flow; depths are indicative.
 - Most 3D building heights are estimated (Overture rarely has heights here).
 - Routing treats roads as two-way and closes a road when its lowest ~92 m cell floods.
