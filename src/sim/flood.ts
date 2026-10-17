@@ -11,7 +11,6 @@
 // hydraulic model behind it. Depths are indicative only.
 
 import type { Grid, ModelSpec, Place, Facility } from '../data/types';
-import { SCORE_WATER } from '../data/types';
 import { DAERAH_NAMES, cellIndex, type LonLat } from '../data/analysis';
 
 export const NEVER = 65535;
@@ -192,26 +191,11 @@ export function placeRisks(sim: FloodSim, grid: Grid, places: Place[], facilitie
   return out.sort((a, b) => a.onset - b.onset || b.people - a.people);
 }
 
-/** Earliest flooding within `cells` grid cells of a point (~0.5 km for 2): when its area's warnings start. */
-export function areaOnset(sim: FloodSim, grid: Grid, lon: number, lat: number, cells = 2): number {
-  const i = cellIndex(grid.meta, lon, lat);
-  if (i < 0) return NEVER;
-  const { width, height } = grid.meta;
-  const r = (i / width) | 0, c = i - r * width;
-  let first = NEVER;
-  for (let y = Math.max(0, r - cells); y <= Math.min(height - 1, r + cells); y++) {
-    for (let x = Math.max(0, c - cells); x <= Math.min(width - 1, c + cells); x++) first = Math.min(first, sim.onset[y * width + x]);
-  }
-  return first;
-}
-
 /** Cell onset at a point, NEVER outside the rain or the flood. */
 export function onsetAt(sim: FloodSim, grid: Grid, lon: number, lat: number): number {
   const i = cellIndex(grid.meta, lon, lat);
   return i < 0 ? NEVER : sim.onset[i];
 }
-
-export const isWater = (grid: Grid, i: number) => grid.score[i] === SCORE_WATER;
 
 export function fmtClock(min: number): string {
   const h = Math.floor(min / 60), m = Math.round(min % 60);

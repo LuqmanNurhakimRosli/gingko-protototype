@@ -122,13 +122,30 @@ function miniMap(grid: Grid, rings: Ring[], sc: Scenario, px = 520): HTMLCanvasE
   return out;
 }
 
+/** The Ginkgo logo (public/logo.svg) as a PNG data URL for the PDF header, or null if it cannot load. */
+async function logoPng(px = 160): Promise<string | null> {
+  try {
+    const svg = await (await fetch(`${import.meta.env.BASE_URL}logo.svg`)).text();
+    const img = new Image();
+    img.src = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = c.height = px;
+    c.getContext('2d')!.drawImage(img, 0, 0, px, px);
+    URL.revokeObjectURL(img.src);
+    return c.toDataURL('image/png');
+  } catch {
+    return null;
+  }
+}
+
 export async function downloadBrief(opts: {
   grid: Grid; rings: Ring[]; report: AreaReport; model: ModelSpec; scenario: Scenario;
   validation: ValidationFile; label: string;
   /** optional AI-drafted summary, printed with its figure check */
   aiBrief?: { text: string; grounded: number; total: number; model: string | null } | null;
 }): Promise<void> {
-  const { jsPDF } = await import('jspdf');
+  const [{ jsPDF }, logo] = await Promise.all([import('jspdf'), logoPng()]);
   const { grid, rings, report, model, scenario, validation, label, aiBrief } = opts;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
@@ -155,10 +172,12 @@ export async function downloadBrief(opts: {
 
   // header
   doc.setFillColor(8, 160, 69); doc.rect(0, 0, W, 3, 'F');
+  const tx = logo ? M + 14 : M;
+  if (logo) doc.addImage(logo, 'PNG', M, 6, 12, 12);
   y = 13; ink(); doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
-  doc.text('Flood susceptibility planning brief', M, y);
+  doc.text('Flood susceptibility planning brief', tx, y);
   y += 6; doc.setFont('helvetica', 'normal'); doc.setFontSize(9); muted();
-  doc.text(`GINKGO · Selangor · ${label} · generated ${new Date().toLocaleString('en-GB')}`, M, y);
+  doc.text(`GINKGO · Selangor · ${label} · generated ${new Date().toLocaleString('en-GB')}`, tx, y);
   y += 4;
   doc.text(`Map shows the ${scenario.label} scenario (${scenario.rain}). Screening only — not a planning decision.`, M, y);
   y += 3;

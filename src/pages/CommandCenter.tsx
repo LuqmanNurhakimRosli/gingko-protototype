@@ -263,17 +263,19 @@ export const CommandCenter: FC = () => {
 
   const openAsk = () => { setAskFocus(t => t + 1); toAsk(); };
 
-  const switchMode = (m: AppMode) => {
+  /** `showPanel` false keeps the current tab (the AI's answer stays in view when it drives the drill). */
+  const switchMode = (m: AppMode, showPanel = true) => {
     setAppMode(m);
     setDrawMode('none');
     setCell(null);
-    if (m === 'drill') { if (isPhone) setSheetTab('drill'); else setRightTab('evac'); }
+    if (m === 'drill') { if (showPanel) { if (isPhone) setSheetTab('drill'); else setRightTab('evac'); } }
     else { drill.setPlaying(false); if (isPhone) setSheetTab('overview'); else setRightTab('insights'); }
   };
-  const routeFrom = (lon: number, lat: number, label?: string) => {
+  const routeFrom = (lon: number, lat: number, label?: string, showPanel = true) => {
     const near = bundle ? nearestPlace(bundle.places, lon, lat) : null;
     drill.setOrigin({ point: [lon, lat], label: label ?? (near ? `near ${near}` : `${lat.toFixed(4)}, ${lon.toFixed(4)}`) });
     drill.setShelter(null);
+    if (!showPanel) return;
     if (isPhone) { setSheetTab('evac'); setSnap('half'); } else setRightTab('evac');
   };
 
@@ -364,10 +366,10 @@ export const CommandCenter: FC = () => {
         setDrill: d => { drillNow.current = d; },
         drillActions: {
           startDrill: (id, intensity, minute) => {
-            if (appMode !== 'drill') switchMode('drill');
+            if (appMode !== 'drill') switchMode('drill', false);
             drill.startAt(id, intensity, minute);
           },
-          routeFrom: (lon, lat, label, mode) => { drill.setMode(mode); routeFrom(lon, lat, label); },
+          routeFrom: (lon, lat, label, mode) => { drill.setMode(mode); routeFrom(lon, lat, label, false); },
         },
       },
       context: appMode === 'drill' ? {
@@ -492,7 +494,7 @@ export const CommandCenter: FC = () => {
         }}
         onBasemapError={msg => { setNotice(msg); setBasemap('streets'); }}
         drill={drillMap}
-        onDrillPick={routeFrom}
+        onDrillPick={(lon, lat, label) => routeFrom(lon, lat, label)}
         onShelterPick={id => drill.data && showShelter(drill.data.shelters.items[id])}
       />
       <MapChrome

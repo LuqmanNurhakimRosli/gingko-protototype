@@ -46,6 +46,7 @@ flowchart LR
 | `03_model.py` | the grid + DOSM totals | Stage 1 score, 3 scenarios, per-daerah stats, validation results, the client grid |
 | `04_facilities.py` | Overture places + rail segments | 2,955 hospitals, clinics, schools, police, Bomba and rail stations (each tagged with its cell's score); operational rail lines |
 | `05_basemap.py` + `tiles.mjs` | Overture land cover, land use, water, airports, 549,043 road segments, place points | 5,725 vector tiles (z5–14) in one 23 MB PMTiles archive, Noto Sans label glyphs |
+| `06_evacuation.py` | Overture road segments and connectors, places, building footprints; the grid | routable road graph (197,323 junctions, 264,379 links, lowest-HAND cell per link) and 1,274 candidate evacuation centres with capacity |
 
 Heavy work happens here, once. The app never fetches a DEM or calls Overpass on a click.
 
@@ -54,6 +55,7 @@ Heavy work happens here, once. The app never fetches a DEM or calls Overpass on 
 - **Map** (`MapView.tsx`, `src/map/style.ts`, `MapChrome.tsx`): MapLibre GL over the bundled Selangor vector tiles, styled like Google Maps (mint vegetation, grey built-up land, blue water, white streets with soft casings, yellow expressways, route shields, quiet labels). The flood layer is an image layer inserted *under* streets and labels, resampled to Web Mercator rows and smoothed. Basemaps: Default, Light, Plain, and **Google Map / Satellite** (optional, below). The map has a floating search bar that also takes questions for Ginkgo, quick chips, a layers panel, locate-me and reset buttons, and keeps its position in the URL (`#map=zoom/lat/lon`). On phones it switches to a full-screen map with a bottom sheet.
 - **Analysis** (`src/data/analysis.ts`): a drawn polygon is rasterised onto the grid and its cells are counted. That gives class areas, zones, people, built-up share, river length, terrain inputs, the "why this score" breakdown, candidate land and the facilities inside. `findCandidateSites` groups screened land into contiguous blocks. Tests check this code reproduces the pipeline's numbers exactly.
 - **Exports**: PDF planning brief (with the AI-drafted summary when there is one) and GeoJSON for any drawn area.
+- **Flood drill** (`src/sim/`): `flood.ts` gives every cell in the rain area the minute it floods (score order, reaching the scenario's High class at the peak) and derives alert levels, place risks and totals; `render.ts` paints water and the 3-hour look-ahead into the map's image layer on every clock tick (only the rain area's rows); `graph.ts` decodes the road graph into typed arrays with a CSR adjacency and a bucket index; `route.ts` runs a time-aware Dijkstra (roads closed once their lowest cell floods before you pass) and a K-nearest multi-source search; `evac.ts` plans who goes where and when the centres fill, in a Web Worker (`evac.worker.ts`, 2–4 s). The drill data (4.2 MB) loads only when the drill opens. Alert levels and colours follow Japan's 5-level system and JMA Kikikuru; centre crowding follows VACAN ([`REFERENCES.md`](REFERENCES.md)).
 
 ## ③ AI copilot — what model, where, and why
 
@@ -183,6 +185,7 @@ Without this key, the default basemap (bundled OpenStreetMap/Overture vector til
 - **Transit exposure:** operational rail lines and 151 stations, in operator colours when the risk layer is off.
 - **Safe-land finder:** screens undeveloped, gentle, low-susceptibility land (not water, not forest-dominated) for early site search.
 - **"Is my spot flood-prone?":** a locate-me check aimed at visitors with phones.
+- **A flood drill with evacuation routing:** a rain event replayed in time with Japan-style alerts and a 3-hour look-ahead, routes that avoid roads flooding before you pass them, a *leave by* time, and evacuation centres that fill up to a Sphere-based capacity — so planners can see where capacity runs out and residents can rehearse their route.
 - **Honesty built in:** susceptibility, not forecast; scenario rule table labelled hypothetical; a validation gate with sources; data provenance in every brief.
 
 ## Refreshing the data

@@ -26,6 +26,7 @@ flowchart LR
     P2[Basemap build<br/>vector tiles + fonts]
     P3[Browser analysis<br/>clip grid · count cells]
     P4[Claude agent<br/>tools · grounding check]
+    P5[Flood drill<br/>time-lapse · alerts ·<br/>routing · centre filling]
   end
   subgraph OUT["OUTPUT"]
     O1[Google-style map with<br/>flood layer + facilities]
@@ -33,6 +34,7 @@ flowchart LR
     O3[Candidate sites]
     O4[Verified AI answers<br/>and AI briefs]
     O5[PDF brief · GeoJSON]
+    O6[Drill: water + 3 h look-ahead,<br/>alerts, routes, centre crowding]
   end
   D1 & D2 & D3 & D4 & D5 --> P1
   D2 --> P2
@@ -42,6 +44,10 @@ flowchart LR
   P3 --> O1 & O2 & O3 & O5
   P4 --> P3
   P4 --> O4 & O1
+  P1 & D2 --> P5
+  U --> P5
+  P4 --> P5
+  P5 --> O6
 ```
 
 | # | Workflow | Input | Process | Output | Code |
@@ -57,7 +63,11 @@ flowchart LR
 | 9 | Ask Ginkgo (AI) | question + map context | Claude calls tools; app checks figures | answer, map changes, cost | `src/copilot/*`, `server/copilot.ts` |
 | 10 | AI planning brief | drawn area | Claude drafts from tool results; figures checked | brief in report and PDF | `CommandCenter.tsx`, `exports.ts` |
 | 11 | Deploy & operate | repo + keys | build, Cloudflare Pages, secrets, cache | public URL | `functions/`, `vite.config.ts` |
-| 12 | Verify | code + data | 42 automated tests, browser runs | pass / fail | `*.test.ts` |
+| 12 | Verify | code + data | 69 automated tests, browser runs | pass / fail | `*.test.ts` |
+| 15 | Drill build | Overture roads, places, buildings + the grid | road graph, candidate centres, capacity | `roads.bin.gz`, `shelters.json` | `pipeline/06_evacuation.py` |
+| 16 | Run a flood drill | event, intensity, clock | flood minute per cell; levels; evacuation plan in a worker | water, look-ahead, alerts, centre crowding | `src/sim/flood.ts`, `evac.ts`, `DrillPanel.tsx` |
+| 17 | Evacuation route | a point, alert, search or GPS; walk/drive | time-aware Dijkstra to a centre with space | route, roads, leave-by time, options | `src/sim/route.ts`, `EvacPanel.tsx` |
+| 18 | AI in the drill | question | drill tools: run, status, route, centres | answer + map changes | `src/copilot/drillTools.ts` |
 
 ---
 
@@ -253,6 +263,7 @@ figure; before a public event set a credit limit on the OpenRouter key (or a mon
 
 ## 14. Five-minute exhibition demo
 
+0. **Flood drill (60 s, can open the demo)** — press **Flood drill**, keep *Klang Valley monsoon storm*, press play. Purple patches flood within the hour; alerts climb the list. Click **Route** on *Taman Sri Muda*: the blue route goes to a centre with space, with *Leave by*. Open the centre card: the illustration, how full it gets and when. "A drill for preparedness — real warnings come from MET, JPS and NADMA."
 1. **Overview (30 s)** — "This is Selangor. Red is where riverine flooding is most likely, from terrain, rivers and 38 years of satellite water history." Point at the Klang and Kuala Langat coast.
 2. **Scenario (30 s)** — switch Normal → Extreme; the red spreads. "A stress test, not a forecast."
 3. **Facilities (45 s)** — tap *Hospitals* and *Schools*; red pins are in High cells. Open Klang: the panel counts them.
@@ -260,3 +271,39 @@ figure; before a public event set a credit limit on the OpenRouter key (or a mon
 5. **Draw and brief (60 s)** — draw a rectangle over a flood-prone town, press **✦ Draft brief with AI**, then **⇩ PDF brief**.
 6. **Visitor's own spot (30 s)** — locate-me on a phone: "Is my spot flood-prone?"
 7. **Honesty (15 s)** — open *Method & validation*: 4 of 7 Dec 2021 flood sites High, 2 of 2 hilly controls Low, and the limitations.
+
+---
+
+## 15. Drill build (offline, run once)
+
+| | |
+|---|---|
+| **Input** | Overture transportation segments (roads), places, building footprints; the grid (`HAND`, rivers, score) |
+| **Process** | Split roads at their connectors, merge same-name chains, keep connected networks; sample HAND every 40 m along each road and keep the lowest cell (skipping bridges and cells holding a mapped river or canal, where roads cross on culverts). Pick schools, community halls, mosques, stadiums and sports halls by category and name (no closed compounds or businesses), drop any in High cells under Extreme, and estimate capacity = usable floor area ÷ 3.5 m² per person (Sphere) from the footprints at each site |
+| **Output** | `public/data/roads.bin.gz` (197,323 junctions, 264,379 links, 4.2 MB) and `roads.json` (layout, road names); `public/data/shelters.json` (1,274 centres) |
+
+## 16. Run a flood drill
+
+| | |
+|---|---|
+| **Input** | Event (Klang Valley monsoon storm, flash flood, Bernam & Selangor rivers, all Selangor), intensity (Heavy / Extreme), clock (play, scrub, 10–40 drill-minutes per second) |
+| **Process** | For every cell in the rain area, the minute it floods: cells at or above the scenario's High threshold flood in score order between the first-flooding time and the peak. From that one array: water now (indicative depth bands), the 3-hour look-ahead, alert level per neighbourhood and facility (earliest flooding in its area), and totals. A worker plans the evacuation: zones (~740 m) get their order an hour before their first cell floods; 15% of residents walk to the nearest of their 6 nearest open centres with space, on roads that stay dry for the hour |
+| **Output** | Water and look-ahead under the streets in JMA Kikikuru colours · alert list (Level 5 flooding, 4 ≤ 1 h, 3 ≤ 2 h, 2 ≤ 3 h) · tiles: people in flooded cells, flooding within 1 h, in centres, with no centre within reach · centres coloured space / filling / crowded / full |
+
+Alert levels follow Japan's 5-level system and Kikikuru colours; centre crowding follows VACAN — see [`REFERENCES.md`](REFERENCES.md).
+
+## 17. Evacuation route
+
+| | |
+|---|---|
+| **Input** | A start point: map click, an alert's **Route**, a searched place or locate-me; walk or drive; the drill clock |
+| **Process** | Snap to the nearest junction; Dijkstra over the road graph where a road is usable only if its lowest point stays dry until 10 minutes after you have passed it; stop at the first centres that will still have space on arrival (from the evacuation plan). If none has space, show the nearest open ones flagged *full*. A binary search over departure times finds **Leave by** — the last departure with a dry way out. If the start is already under water, a short wade (≤ 600 m) is allowed and reported |
+| **Output** | Blue route on the map with grey options · minutes, km, arrival time · roads to follow · centre card (illustration, capacity, fill chart, ground safety, capacity method, real photos on Google Maps) · **Navigate in Google Maps** |
+
+## 18. AI in the drill
+
+| | |
+|---|---|
+| **Input** | A question such as *"Simulate the Klang Valley storm and tell me how people in Taman Sri Muda get to safety"* |
+| **Process** | `run_flood_drill` (starts the drill on screen and returns the situation), `get_drill_status`, `plan_evacuation_route` (draws the route), `list_evacuation_centres`; every figure checked against the tool results |
+| **Output** | A short answer in drill times (T+h:mm), the centre, walking time and leave-by time, and a reminder to follow official instructions |

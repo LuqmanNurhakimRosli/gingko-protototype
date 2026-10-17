@@ -346,7 +346,7 @@ function addAppLayers(m: MLMap, bundle: AppDataBundle) {
     { id: 'shelter-selected', type: 'circle', source: 'shelters', filter: ['==', ['get', 'id'], -1], layout: { visibility: 'none' },
       paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 9, 12, 14, 15, 18], 'circle-color': 'rgba(0,0,0,0)',
         'circle-stroke-color': '#111111', 'circle-stroke-width': 2.5 } },
-    { id: 'shelter-circle', type: 'circle', source: 'shelters', layout: { visibility: 'none' },
+    { id: 'shelter-circle', type: 'circle', source: 'shelters', minzoom: 9, layout: { visibility: 'none' },
       paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 2.2, 10, 3.5, 11.5, 6.5, 13, 9.5, 16, 12],
         'circle-color': ['match', ['coalesce', ['feature-state', 'crowd'], 0], 1, CROWDING.busy.color, 2, CROWDING.crowded.color, 3, CROWDING.full.color, 4, CROWDING.closed.color, CROWDING.open.color],
         'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 8, 1, 13, 2] } },
