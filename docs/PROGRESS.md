@@ -52,7 +52,7 @@ Legend: ✅ done · 🟡 in progress / waiting · ⬜ planned · ⚠️ known is
 | 2026-10-17 | `9129d6b` | Drill polish (AI keeps its answer in view, phone layout), docs, references |
 | 2026-10-17 | `15d871e` | 3D sketch-style model of Taman Sri Muda with the drill's water |
 | 2026-10-17 | `8450dba` | 3-minute pitch video script |
-| 2026-10-17 | *(this commit)* | System guide and progress tracker |
+| 2026-10-17 | `a56cf59` | System guide, progress tracker and docs index |
 
 ---
 
