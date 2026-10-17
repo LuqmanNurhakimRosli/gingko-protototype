@@ -230,4 +230,5 @@ Rebuilding the data: see the README (*Rebuilding the data*). The demo film: [`de
 | [`WORKFLOW_BLUEPRINT.md`](WORKFLOW_BLUEPRINT.md) | Every workflow as Input → Process → Output; demo script |
 | [`REFERENCES.md`](REFERENCES.md) | Japan, Singapore and Malaysia systems the drill follows |
 | [`VIDEO_SCRIPT.md`](VIDEO_SCRIPT.md) | The 3-minute pitch video script |
+| [`../demo/pitch/PROMPT.md`](../demo/pitch/PROMPT.md) | Brief for editing the pitch video locally (motion graphics, music, sound effects) |
 | [`../demo/README.md`](../demo/README.md) | How the 2-minute demo film is made |

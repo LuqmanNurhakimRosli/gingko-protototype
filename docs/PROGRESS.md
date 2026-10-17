@@ -3,8 +3,7 @@
 A living record of what is built, what is in progress and what is next. Update it whenever a piece of work lands:
 move items between sections, add a milestone row with its commit, and note any decision.
 
-**Last updated:** 2026-10-17 · **Branch:** `ccr-4f4b5ee6-9w2dmb` · **`main`** is at `820e47b` (OpenRouter); everything
-after that is on the branch until it is merged.
+**Last updated:** 2026-10-17 · **`main`** has everything below (the branch `ccr-4f4b5ee6-9w2dmb` was fast-forwarded into it).
 
 Legend: ✅ done · 🟡 in progress / waiting · ⬜ planned · ⚠️ known issue
 
@@ -30,9 +29,10 @@ Legend: ✅ done · 🟡 in progress / waiting · ⬜ planned · ⚠️ known is
 | Ginkgo logo and favicon | ✅ | |
 | Reference systems write-up (Japan, Singapore, Malaysia) | ✅ | `REFERENCES.md` |
 | 3D sketch model — Taman Sri Muda | ✅ | with drill water and route |
-| 3-minute pitch video | 🟡 | script done (`VIDEO_SCRIPT.md`); waiting for the founder's on-camera and voice-over recordings |
+| 3-minute pitch video | 🟡 | script done; recordings done (Parts A, B, C); edit happens locally with Claude Code — brief in `demo/pitch/PROMPT.md` |
 | System guide and this tracker | ✅ | `SYSTEM_GUIDE.md`, `PROGRESS.md` |
-| Merge the branch into `main` | 🟡 | waiting for the go-ahead |
+| Merge the branch into `main` | ✅ | fast-forward, 2026-10-17 |
+| Pitch demo capture script (`demo/pitch/capture.mjs`) | 🟡 | ⚠️ written, not run yet; first local run will need fixes |
 
 ---
 
@@ -53,6 +53,7 @@ Legend: ✅ done · 🟡 in progress / waiting · ⬜ planned · ⚠️ known is
 | 2026-10-17 | `15d871e` | 3D sketch-style model of Taman Sri Muda with the drill's water |
 | 2026-10-17 | `8450dba` | 3-minute pitch video script |
 | 2026-10-17 | `a56cf59` | System guide, progress tracker and docs index |
+| 2026-10-17 | (this commit) | Pitch video brief for local editing (`demo/pitch/PROMPT.md`), demo capture script; **branch merged to `main`** |
 
 ---
 
@@ -82,9 +83,9 @@ Ordered by value for the exhibition and a council pilot.
 
 | # | Item | Why | Size |
 |---|---|---|---|
-| 1 | **Record and edit the 3-minute video** | The pitch | founder records → edit |
+| 1 | **Edit the pitch video** (under 4 min, motion graphics, music, sound effects) | The pitch | 1–2 local sessions with `demo/pitch/PROMPT.md` |
 | 2 | **Refresh the 2-minute demo film** with the drill, the 3D view and the new logo | Current film predates them | 1 session |
-| 3 | **Merge to `main` and deploy** (Cloudflare Pages + AI key + spend limit) | Public link for judges | small |
+| 3 | **Deploy `main`** (Cloudflare Pages + AI key + spend limit) | Public link for judges | small |
 | 4 | **Test OpenRouter live** with the real key and model slug | Unverified so far | small |
 | 5 | **Live river levels** from Public InfoBanjir to start or steer the drill | From rehearsal to real warnings | medium |
 | 6 | **Official PPS list** (NADMA / JKM) to replace or confirm the candidate centres | Real names and capacities | medium (needs data access) |
@@ -101,6 +102,7 @@ Ordered by value for the exhibition and a council pilot.
 
 - ⚠️ The demo film (`docs/demo/ginkgo-demo.mp4`) shows the app before the drill, 3D view and new logo.
 - ⚠️ OpenRouter integration follows the documented API but has not been called live.
+- ⚠️ `demo/pitch/capture.mjs` has not been run; selectors and timings may need fixing on the first run.
 - The drill's water spreads by susceptibility score, not by flow; depths are indicative.
 - Most 3D building heights are estimated (Overture rarely has heights here).
 - Routing treats roads as two-way and closes a road when its lowest ~92 m cell floods.
@@ -122,6 +124,7 @@ Ordered by value for the exhibition and a council pilot.
 | 2026-10-17 | Evacuation orders per ~740 m zone; 15% to public centres | Matches how orders are issued; Dec 2021 behaviour |
 | 2026-10-17 | Centre images are illustrations by type, plus a Google Maps photo link | No licensed photos of each building |
 | 2026-10-17 | 3D area = Taman Sri Muda, not Kuala Lumpur | KL is outside the analysis; Sri Muda is the drill's demo site and the 2021 flood |
+| 2026-10-17 | Edit the pitch video on the founder's laptop; recordings and music never committed | Files too large to transfer to the cloud session; keeps the repo light and avoids redistributing licensed music |
 
 ---
 

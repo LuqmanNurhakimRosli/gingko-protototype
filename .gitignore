@@ -30,3 +30,9 @@ dist-ssr
 demo/assets
 demo/preview
 demo/*.mp4
+
+# pitch video: recordings, working files and renders stay local (see demo/pitch/PROMPT.md)
+demo/pitch/recordings/
+demo/pitch/work/
+demo/pitch/out/
+demo/pitch/audio/

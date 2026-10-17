@@ -2,8 +2,8 @@
 
 **Format:** a student founder pitches Ginkgo to a panel of urban experts, *Shark Tank* style.
 **Length:** 3:00. **Half on camera** (you, your face, your words) · **half demo** (screen recording with your voice-over).
-**Status:** script only. Nothing is generated yet. You record Part A and C on camera and Part B as voice-over;
-send the files back and the demo footage, motion graphics and edit are built around your voice.
+**Status:** recordings done (`PART A.mp4`, `PART B.mp4`, `PART C.mp4`). The edit is made locally with Claude Code, following
+[`demo/pitch/PROMPT.md`](../demo/pitch/PROMPT.md): demo footage, motion graphics, music and sound effects built around your voice.
 
 ---
 

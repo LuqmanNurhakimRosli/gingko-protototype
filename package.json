@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "demo:capture": "node demo/capture.mjs",
-    "demo:render": "node demo/render.mjs"
+    "demo:render": "node demo/render.mjs",
+    "pitch:capture": "node demo/pitch/capture.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
