@@ -13,6 +13,7 @@ evacuation centres that still have space.
 > river-gauge data; its times are drill times and its depths are indicative only.
 > The copilot explains computed numbers; it never produces one.
 
+**Documentation index:** [`docs/README.md`](docs/README.md) — start with the [system guide](docs/SYSTEM_GUIDE.md); progress is tracked in [`docs/PROGRESS.md`](docs/PROGRESS.md) ·
 **Every workflow as Input → Process → Output (incl. AI and AI efficiency):** [`docs/WORKFLOW_BLUEPRINT.md`](docs/WORKFLOW_BLUEPRINT.md) ·
 **Architecture, where AI is used, and API setup:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) ·
 **2-minute demo film (silent, captioned):** [`docs/demo/ginkgo-demo.mp4`](docs/demo/ginkgo-demo.mp4), made with [`demo/`](demo/README.md) ·
@@ -36,6 +37,7 @@ evacuation centres that still have space.
 | **Method & validation** | Top-right button: formula, weights, scenario rule table, validation results with sources, data provenance, limitations. |
 | **Flood drill** | **Flood drill** in the top bar. Pick an event (Klang Valley monsoon storm — the Dec 2021 pattern —, flash flood, Bernam & Selangor rivers, all Selangor) and press play: water spreads from the most susceptible ground until, at the peak, it covers the scenario's High class. The map shows water now and a 3-hour look-ahead in JMA Kikikuru colours (yellow ≤ 3 h, red ≤ 2 h, purple ≤ 1 h). Every neighbourhood gets an alert on Japan's 5-level scale. |
 | **Evacuation routes** | Click the map, an alert's **Route**, a search result or locate-me: the route goes to the nearest evacuation centre that will have space when you arrive, on roads that stay dry until you have passed. Walk or drive, turn-by-turn roads, options, **Leave by T+h:mm** (the last departure with a dry way out), a warning when the start is already under water, and a link to navigate in Google Maps. |
+| **3D view · Taman Sri Muda** | The **◆ 3D · Sri Muda** chip opens an architect's white model of 23,336 buildings (white volumes, dark outlines, soft shadows) around Taman Sri Muda. In a drill the water rises through the streets at the drill's depths, with the evacuation route and centres marked and a card comparing the depth with a two-storey house. |
 | **Evacuation centres** | 1,274 candidate PPS — schools, community halls, mosques, stadiums and sports halls on ground that stays Low or Moderate under Extreme rain. Capacity from building footprints at 3.5 m² per person (Sphere). During the drill they fill up (VACAN-style: space · filling · crowded · full); each card has an illustration of the building type, a fill-over-time chart and a link to real photos on Google Maps. Not the official NADMA/JKM list. |
 
 The map looks and works like Google Maps: a self-hosted vector basemap in a Google-like style (mint vegetation, white streets, yellow expressways, blue water, route shields), the flood layer under streets and labels, rail lines in operator colours, floating search, quick chips, a layers panel (Default · Light · Plain · Google/Satellite with a key), locate-me and reset buttons. The view is kept in the URL so it can be shared. On desktop the right panel has **Insights** and **✦ Ask Ginkgo** tabs; on a phone the app becomes a full-screen map with a draggable bottom sheet. The whole map works offline.
@@ -147,6 +149,7 @@ PY=.venv/bin/python pipeline/run_all.sh      # ≈14 min, ~1.4 GB cache in pipel
 | `03_model.py` | Stage 1 score, scenarios, per-daerah stats, validation, client grid files |
 | `04_facilities.py` | Hospitals, clinics, schools, police, Bomba, rail stations (filtered, de-duplicated) and operational rail lines |
 | `05_basemap.py` + `tiles.mjs` | Google-style basemap: roads, water, land cover, land use, airports, place names → vector tiles → `public/basemap/selangor.pmtiles` |
+| `07_model3d.py` | 3D massing model of Taman Sri Muda (`model3d.bin.gz`): Overture building footprints with heights (estimated from footprint size where not mapped), streets, rivers and drains |
 | `06_evacuation.py` | Drill road graph (`roads.bin.gz`: junctions, links, shapes, the lowest-HAND cell along each road with bridges and stream crossings excluded) and candidate evacuation centres with capacity (`shelters.json`) |
 
 ## Limitations
@@ -172,6 +175,7 @@ public/basemap/      self-hosted vector tiles (PMTiles) and label fonts
 src/data/            types, loading, grid analysis + site screen (+ tests), overlays, formatting, Google tiles
 src/map/             basemap style (Google-like) and runtime icons (+ tests)
 src/copilot/         Claude agent: spec (prompt + tools + prices), browser tools (incl. drill tools), loop, grounding check; template explainer
+src/three/           3D sketch view of Taman Sri Muda (three.js, loaded on demand)
 src/sim/             flood drill: time-lapse, alert levels, road graph, time-aware routing, evacuation plan (worker), map painter (+ tests)
 src/components/      map, map chrome, panels, copilot, sites, bottom sheet, charts; sim/ drill panels, timeline, centre illustrations; brand/ logo
 src/services/        PDF brief and GeoJSON export

@@ -68,6 +68,7 @@ flowchart LR
 | 16 | Run a flood drill | event, intensity, clock | flood minute per cell; levels; evacuation plan in a worker | water, look-ahead, alerts, centre crowding | `src/sim/flood.ts`, `evac.ts`, `DrillPanel.tsx` |
 | 17 | Evacuation route | a point, alert, search or GPS; walk/drive | time-aware Dijkstra to a centre with space | route, roads, leave-by time, options | `src/sim/route.ts`, `EvacPanel.tsx` |
 | 18 | AI in the drill | question | drill tools: run, status, route, centres | answer + map changes | `src/copilot/drillTools.ts` |
+| 19 | 3D view | the 3D chip (+ the drill clock) | white massing model; water surface from the drill; route tube | 3D Taman Sri Muda with water and route | `pipeline/07_model3d.py`, `src/three/` |
 
 ---
 
@@ -307,3 +308,11 @@ Alert levels follow Japan's 5-level system and Kikikuru colours; centre crowding
 | **Input** | A question such as *"Simulate the Klang Valley storm and tell me how people in Taman Sri Muda get to safety"* |
 | **Process** | `run_flood_drill` (starts the drill on screen and returns the situation), `get_drill_status`, `plan_evacuation_route` (draws the route), `list_evacuation_centres`; every figure checked against the tool results |
 | **Output** | A short answer in drill times (T+h:mm), the centre, walking time and leave-by time, and a reminder to follow official instructions |
+
+## 19. 3D view — Taman Sri Muda
+
+| | |
+|---|---|
+| **Input** | **◆ 3D · Sri Muda** chip; in a drill, the clock and the chosen route |
+| **Process** | Load `model3d.bin.gz` (0.4 MB) and three.js on demand; extrude 23,336 footprints to their heights (Overture, or estimated from footprint size); draw white volumes with dark roof outlines and corners; for each drill minute, lift a water surface over the model's ~92 m cells to their indicative depth |
+| **Output** | An architect's white model to orbit and zoom; water rising between the houses; the evacuation route as a blue tube; centres as green pins; a depth-versus-house card. *Play the flood here* starts the Klang Valley drill from Planning mode |
