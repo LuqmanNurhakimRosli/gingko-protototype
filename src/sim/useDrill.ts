@@ -21,7 +21,7 @@ export interface Drill {
   setEvent: (id: string) => void;
   setIntensity: (i: Intensity) => void;
   /** start an event at a given drill minute (used by the AI agent) */
-  startAt: (id: string, intensity: Intensity | null, minute: number) => void;
+  startAt: (id: string, intensity: Intensity | null, minute: number, play?: boolean) => void;
   sim: FloodSim | null;
   t: number;
   setT: (t: number) => void;
@@ -121,11 +121,11 @@ export function useDrill(active: boolean, bundle: AppDataBundle | null, grid: Gr
   const setT = useCallback((v: number) => setClock(c => ({ ...c, key, t: v })), [key]);
   const setPlaying = useCallback((p: boolean) => setClock(c => ({ key, t: c.key === key ? c.t : 0, playing: p })), [key]);
   const setEvent = useCallback((id: string) => { setEventId(id); setIntensityState(null); }, []);
-  const startAt = useCallback((id: string, i: Intensity | null, minute: number) => {
+  const startAt = useCallback((id: string, i: Intensity | null, minute: number, play = false) => {
     const base = EVENTS.find(e => e.id === id) ?? EVENTS[0];
     setEventId(base.id);
     setIntensityState(i);
-    setClock({ key: `${base.id}:${i ?? base.intensity}`, t: minute, playing: false });
+    setClock({ key: `${base.id}:${i ?? base.intensity}`, t: minute, playing: play });
   }, []);
   const setShelter = useCallback((id: number | null) => setChosen({ run, id }), [run]);
 

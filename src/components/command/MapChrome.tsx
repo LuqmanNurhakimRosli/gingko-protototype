@@ -39,6 +39,9 @@ interface Props {
   onDismissNotice: () => void;
   /** flood drill: a drill legend replaces the susceptibility one; no drawing tools */
   drill?: boolean;
+  /** open or close the 3D sketch view of Taman Sri Muda */
+  on3D?: () => void;
+  view3d?: boolean;
 }
 
 const CHIPS: { key: keyof LayerState; label: string; icon: string; needsDetail?: boolean }[] = [
@@ -90,6 +93,7 @@ export const MapChrome: FC<Props> = (p) => {
         />
         <div className="gm-chips" role="toolbar" aria-label="Quick layers">
           <button className="gm-chip ask" onClick={p.onAsk}><span aria-hidden>✦</span> Ask Ginkgo</button>
+          {p.on3D && <button className="gm-chip three-d" aria-pressed={p.view3d} onClick={p.on3D} title="A 3D sketch model of Taman Sri Muda">◆ 3D · Sri Muda</button>}
           {CHIPS.map(c => (
             <button key={c.key} className="gm-chip" aria-pressed={p.layers[c.key]}
               disabled={c.needsDetail && !p.detailReady}

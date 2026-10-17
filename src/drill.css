@@ -175,3 +175,50 @@
 .crowd-summary span { display: inline-flex; align-items: center; gap: 4px; }
 .crowd-summary i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .crowd-summary b { color: var(--text-primary); }
+
+/* ── 3D sketch view (architect's white model) ─────────────────────────── */
+.sketch3d { position: absolute; inset: 0; z-index: 1050; background: #F3F0E8; overflow: hidden; }
+.sketch3d canvas { display: block; }
+.sketch-labels { position: absolute; inset: 0; z-index: 1; overflow: hidden; }
+.sk-head {
+  position: absolute; left: 12px; right: 12px; top: 12px; z-index: 3; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 10px 8px 14px; border-radius: 14px; background: rgba(255,255,255,.88); backdrop-filter: blur(6px);
+  border: 1px solid rgba(46,46,46,.18); box-shadow: 0 6px 20px rgba(0,0,0,.08);
+}
+.sk-head b { display: block; font-size: 14px; letter-spacing: -.01em; }
+.sk-head span { font-size: 11px; color: var(--text-muted); }
+.sk-tools { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.sk-tools button {
+  border: 1px solid rgba(46,46,46,.3); background: #fff; color: #2E2E2E; border-radius: 999px; padding: 5px 11px;
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.sk-tools button[aria-pressed="false"] { opacity: .55; }
+.sk-tools button[aria-pressed="true"] { background: #2E2E2E; color: #fff; border-color: #2E2E2E; }
+.sk-tools .sk-close { width: 30px; padding: 5px 0; }
+.sk-status { position: absolute; inset: 0; display: grid; place-items: center; font-size: 14px; color: var(--text-secondary); }
+.sk-card {
+  position: absolute; left: 12px; bottom: 12px; z-index: 3; max-width: 380px; padding: 12px 14px; border-radius: 14px;
+  background: rgba(255,255,255,.92); border: 1px solid rgba(46,46,46,.18); box-shadow: 0 6px 20px rgba(0,0,0,.08);
+  display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; align-items: center;
+}
+.sk-clock { grid-column: 1 / -1; font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+.sk-gauge svg { width: 54px; height: 72px; display: block; }
+.sk-text { font-size: 12.5px; line-height: 1.45; color: #2E2E2E; }
+.sk-card > .sk-text:only-child, .sk-card > .sk-text:first-child { grid-column: 1 / -1; }
+.sk-text span { display: block; margin-top: 3px; font-size: 11px; color: var(--text-muted); }
+.sk-text .btn { display: inline-flex; margin-top: 8px; }
+.sk-route { grid-column: 1 / -1; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.sk-route i { width: 18px; height: 5px; border-radius: 3px; background: #1A73E8; display: inline-block; }
+.sk-label {
+  font-family: Inter, system-ui, sans-serif; font-size: 11px; white-space: nowrap; pointer-events: none; color: #2E2E2E;
+  text-shadow: 0 0 3px #F3F0E8, 0 0 3px #F3F0E8, 0 0 3px #F3F0E8;
+}
+.sk-label.place { font-weight: 700; letter-spacing: .14em; text-transform: uppercase; font-size: 10.5px; }
+.sk-label.water { font-style: italic; color: #4C6A86; }
+.sk-label.road { color: #6B6B6B; font-size: 10px; }
+.sk-label.centre {
+  font-weight: 650; color: #fff; background: #1E8E3E; padding: 2px 7px; border-radius: 9px; text-shadow: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25);
+}
+.gm-chip.three-d { font-weight: 650; }
+.gm-chip.three-d[aria-pressed="true"] { background: #2E2E2E; color: #fff; border-color: #2E2E2E; }

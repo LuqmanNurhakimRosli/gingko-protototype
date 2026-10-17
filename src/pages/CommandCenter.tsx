@@ -3,7 +3,7 @@
 // Phone: full-screen map with a bottom sheet. Every number on screen is read from
 // the precomputed files in public/data or counted from them for a drawn area.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FC } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FC } from 'react';
 import {
   analyseCells, analysePolygon, facilitiesInCells, findCandidateSites, queryCell, rasterizePolygon,
   type AreaReport, type CandidateSite, type CellInfo, type Ring,
@@ -75,6 +75,8 @@ function reportFor(grid: Grid, model: ModelSpec, items: Facility[], rings: Ring[
 }
 
 const NO_SHELTERS: Shelter[] = [];
+// the 3D sketch view and three.js load only when opened
+const Sketch3D = lazy(() => import('../three/Sketch3D'));
 
 const DEFAULT_LAYERS: LayerState = {
   susceptibility: true, showLow: false, history: false, sites: false, rivers: false, boundaries: true, built: false,
@@ -127,6 +129,7 @@ export const CommandCenter: FC = () => {
   const [appMode, setAppMode] = useState<AppMode>('plan');
   const [lookahead, setLookahead] = useState(true);
   const [shelterFit, setShelterFit] = useState<DrillFit | null>(null);
+  const [view3d, setView3d] = useState(false);
 
   // ── load: core first (map paints), terrain detail in the background ──────
   useEffect(() => {
@@ -506,7 +509,17 @@ export const CommandCenter: FC = () => {
         onReset={() => { setResetToken(t => t + 1); setSelected(null); setActiveArea(null); setCell(null); setSites(null); }}
         notice={notice} onDismissNotice={() => setNotice(null)}
         drill={inDrill}
+        on3D={() => setView3d(v => !v)} view3d={view3d}
       />
+      {view3d && (
+        <Suspense fallback={<div className="sketch3d"><div className="sk-status">Loading the 3D view…</div></div>}>
+          <Sketch3D grid={grid} sim={inDrill ? drill.sim : null} t={drill.t}
+            route={inDrill && drill.route?.ok ? drill.route.routes[Math.min(drill.pick, drill.route.routes.length - 1)].path : null}
+            routeShelter={inDrill ? chosenShelter : null}
+            onClose={() => setView3d(false)}
+            onPlayFlood={inDrill ? null : () => { switchMode('drill', false); drill.startAt('klang-valley', null, 0, true); }} />
+        </Suspense>
+      )}
     </main>
   );
 
